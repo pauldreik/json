@@ -1,15 +1,37 @@
 #!/bin/sh
 
 #
-# builds the fuzzers
+# builds the fuzzers, runs old crashes etc
+#
+# Optional: set environment variable CLANG, otherwise clang is auto detected.
+#
+# By Paul Dreik 2019 for the boost json project
+# License: Boost 1.0
 
-set -eu
+set -e
 
 fuzzdir=$(dirname $0)
 
 cd $fuzzdir
 
-CLANG=clang++-8
+if [ -z $CLANG ] ; then
+    #see if we can find clang
+    for clangver in -10 -9 -8 -7 -6 -6.0 "" ;   do
+	CLANG=clang++$clangver
+	if which $CLANG >/dev/null; then
+	    break
+	fi
+    done
+fi
+
+if ! which $CLANG >/dev/null; then
+    if ! -x $CLANG; then
+	echo $me: sorry, could not find clang $CLANG
+	exit 1
+    fi
+fi
+echo $me: will use clang $CLANG
+
 srcfile=fuzzer.cpp
 fuzzer=./fuzzer
 
