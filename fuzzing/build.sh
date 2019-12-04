@@ -11,6 +11,7 @@
 set -e
 
 fuzzdir=$(dirname $0)
+me=$(basename $0)
 
 cd $fuzzdir
 
