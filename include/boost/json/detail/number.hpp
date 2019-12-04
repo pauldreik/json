@@ -13,6 +13,7 @@
 #include <boost/json/config.hpp>
 #include <boost/json/error.hpp>
 #include <boost/json/kind.hpp>
+#include <type_traits>
 
 namespace boost {
 namespace json {
@@ -29,6 +30,8 @@ struct number
 
     json::kind kind;
 };
+
+//----------------------------------------------------------
 
 class number_parser
 {
@@ -106,7 +109,7 @@ public:
 } // boost
 
 #ifdef BOOST_JSON_HEADER_ONLY
-#include <boost/json/detail/number.ipp>
+#include <boost/json/detail/impl/number.ipp>
 #endif
 
 #endif
