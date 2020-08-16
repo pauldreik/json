@@ -4,14 +4,13 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/vinniefalco/json
+// Official repository: https://github.com/cppalliance/json
 //
 
 #ifndef BOOST_JSON_IMPL_OBJECT_HPP
 #define BOOST_JSON_IMPL_OBJECT_HPP
 
 #include <boost/json/value.hpp>
-#include <boost/json/detail/except.hpp>
 #include <iterator>
 #include <cmath>
 #include <type_traits>
@@ -339,22 +338,6 @@ emplace(
 //
 //----------------------------------------------------------
 
-auto
-object::
-next(value_type& e) noexcept ->
-    value_type*&
-{
-    return detail::next_access::get(e);
-}
-
-auto
-object::
-next(value_type const& e) noexcept ->
-    value_type const*
-{
-    return detail::next_access::get(e);
-}
-
 template<class InputIt>
 void
 object::
@@ -414,8 +397,7 @@ insert_range(
         std::distance(first, last));
     auto const n0 = size();
     if(n > max_size() - n0)
-        BOOST_THROW_EXCEPTION(
-            detail::object_too_large_exception());
+        object_too_large::raise();
     if( min_capacity < n0 + n)
         min_capacity = n0 + n;
     place_impl f(first, n, sp_);

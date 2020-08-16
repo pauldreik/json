@@ -4,13 +4,13 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/vinniefalco/json
+// Official repository: https://github.com/cppalliance/json
 //
 
 #ifndef BOOST_JSON_NUMBER_CAST_HPP
 #define BOOST_JSON_NUMBER_CAST_HPP
 
-#include <boost/json/config.hpp>
+#include <boost/json/detail/config.hpp>
 #include <boost/json/value.hpp>
 #include <boost/json/detail/number_cast.hpp>
 #include <type_traits>
@@ -46,7 +46,7 @@ namespace json {
     @param ec Set to the error, if any occurred.
 */
 template<class T>
-#ifdef GENERATING_DOCUMENTATION
+#ifdef BOOST_JSON_DOCS
 T
 #else
 typename std::enable_if<
@@ -90,7 +90,7 @@ number_cast(value const& jv, error_code& ec)
     @throws system_error on error.
 */
 template<class T>
-#ifdef GENERATING_DOCUMENTATION
+#ifdef BOOST_JSON_DOCS
 T
 #else
 typename std::enable_if<

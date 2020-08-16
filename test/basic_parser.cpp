@@ -1,5 +1,6 @@
 //
 // Copyright (c) 2019 Vinnie Falco (vinnie.falco@gmail.com)
+// Copyright (c) 2020 Krystian Stasiowski (sdkrystian@gmail.com)
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -10,13 +11,13 @@
 // Test that header file is self-contained.
 #include <boost/json/basic_parser.hpp>
 
-#include <boost/beast/_experimental/unit_test/suite.hpp>
 #include <memory>
 #include <string>
 #include <utility>
 
-#include "test.hpp"
 #include "parse-vectors.hpp"
+#include "test.hpp"
+#include "test_suite.hpp"
 
 namespace boost {
 namespace json {
@@ -104,33 +105,10 @@ namespace {
 bool
 validate( string_view s )
 {
-    // The null parser discards all the data
-
-    struct null_parser : basic_parser
-    {
-        null_parser() {}
-        ~null_parser() {}
-        void on_document_begin( error_code& ) override {}
-        void on_document_end( error_code& ) override {}
-        void on_object_begin( error_code& ) override {}
-        void on_object_end( error_code& ) override {}
-        void on_array_begin( error_code& ) override {}
-        void on_array_end( error_code& ) override {}
-        void on_key_part( string_view, error_code& ) override {}
-        void on_key( string_view, error_code& ) override {}
-        void on_string_part( string_view, error_code& ) override {}
-        void on_string( string_view, error_code& ) override {}
-        void on_int64( std::int64_t, error_code& ) override {}
-        void on_uint64( std::uint64_t, error_code& ) override {}
-        void on_double( double, error_code& ) override {}
-        void on_bool( bool, error_code& ) override {}
-        void on_null( error_code& ) override {}
-    };
-
     // Parse with the null parser and return false on error
     null_parser p;
     error_code ec;
-    p.finish( s.data(), s.size(), ec );
+    p.write( s.data(), s.size(), ec );
     if( ec )
         return false;
 
@@ -138,185 +116,423 @@ validate( string_view s )
     return true;
 }
 
+parse_options
+make_options(
+    bool comments,
+    bool commas,
+    bool utf8)
+{
+    parse_options opt;
+    opt.allow_comments = comments;
+    opt.allow_trailing_commas = commas;
+    opt.allow_invalid_utf8 = utf8;
+    return opt;
+}
+
 } // (anon)
 
-class basic_parser_test : public beast::unit_test::suite
+class basic_parser_test
 {
 public:
-    void
-    split_grind(
-        string_view s,
-        error_code ex = {})
+    ::test_suite::log_type log;
+
+    void 
+    grind_one(
+        string_view s, 
+        bool good, 
+        parse_options po)
     {
-        // make sure all split inputs
-        // produce the same result.
-        for(std::size_t i = 1;
-            i < s.size(); ++i)
+        error_code ec;
+        fail_parser p(po);
+        p.write(false,
+            s.data(), s.size(), ec);
+        BOOST_TEST((good && !ec) || 
+            (! good && ec));
+    }
+
+    void 
+    grind_one(
+        string_view s, 
+        bool good, 
+        const std::vector<parse_options>& configs)
+    {
+        for (const parse_options& po : configs)
+            grind_one(s, good, po);
+    }
+
+    void
+    grind(
+        string_view s, 
+        bool good,
+        parse_options po)
+    {
+        grind_one(s, good, po);
+
+        // split/errors matrix
+        if(! s.empty())
         {
-            if(! BEAST_EXPECT(i < 100000))
-                break;
-            error_code ec;
-            fail_parser p;
-            auto const n =
-                p.write_some(s.data(), i, ec);
-            if(ec)
+            for(std::size_t i = 1;
+                i < s.size(); ++i)
             {
-                BEAST_EXPECTS(ec == ex,
-                    ec.message());
-                continue;
+                for(std::size_t j = 1;;++j)
+                {
+                    error_code ec;
+                    fail_parser p(j, po);
+                    p.write(true, s.data(), i, ec);
+                    if(ec == error::test_failure)
+                        continue;
+                    if(! ec)
+                    {
+                        p.write(false, s.data() + i,
+                            s.size() - i, ec);
+                        if(ec == error::test_failure)
+                            continue;
+                    }
+                    BOOST_TEST((good && !ec) || (
+                        ! good && ec));
+                    break;
+                }
             }
-            p.write(
-                s.data() + n,
-                s.size() - n, ec);
-            if(! ec)
-                p.finish(ec);
-            if(! BEAST_EXPECTS(ec == ex,
-                ec.message()))
-                log << "should be " << ex.message() << std::endl;
+        }
+
+        // split/exceptions matrix
+        if(! s.empty())
+        {
+            for(std::size_t i = 1;
+                i < s.size(); ++i)
+            {
+                for(std::size_t j = 1;;++j)
+                {
+                    error_code ec;
+                    throw_parser p(j, po);
+                    try
+                    {
+                        p.write(
+                            true, s.data(), i, ec);
+                        if(! ec)
+                            p.write(
+                                false, s.data() + i,
+                                    s.size() - i, ec);
+                        BOOST_TEST((good && !ec) || (
+                            ! good && ec));
+                        break;
+                    }
+                    catch(test_exception const&)
+                    {
+                        continue;
+                    }
+                    catch(std::exception const& e)
+                    {
+                        BOOST_TEST_FAIL();
+                        log << "  " <<
+                            e.what() << std::endl;
+                    }
+                }
+            }
         }
     }
 
     void
-    fail_grind(
-        string_view s,
-        error_code ex = {})
+    grind(
+        string_view s, 
+        bool good,
+        const std::vector<parse_options>& configs)
     {
-        // exercise all error paths
-        for(std::size_t j = 1;;++j)
-        {
-            if(! BEAST_EXPECT(j < 100000))
-                break;
-            error_code ec;
-            fail_parser p(j);
-            p.write(
-                s.data(), s.size(), ec);
-            if(! ec)
-                p.finish(ec);
-            if(ec == error::test_failure)
-                continue;
-            BEAST_EXPECTS(ec == ex,
-                ec.message());
-            break;
-        }
-    }
-
-    void
-    throw_grind(
-        string_view s,
-        error_code ex = {})
-    {
-        // exercise all exception paths
-        for(std::size_t j = 1;;++j)
-        {
-            if(! BEAST_EXPECT(j < 100000))
-                break;
-            error_code ec;
-            throw_parser p(j);
-            try
-            {
-                p.write(
-                    s.data(), s.size(), ec);
-                if(! ec)
-                    p.finish(ec);
-                BEAST_EXPECTS(ec == ex,
-                    ec.message());
-                break;
-            }
-            catch(test_exception const&)
-            {
-                continue;
-            }
-            catch(std::exception const& e)
-            {
-                BEAST_FAIL();
-                log << "  " <<
-                    e.what() << std::endl;
-            }
-        }
-    }
-
-    void
-    grind(string_view s, bool good)
-    {
-        error_code ex;
-        {
-            fail_parser p;
-            p.write(
-                s.data(),
-                s.size(),
-                ex);
-            if(! ex)
-                p.finish(ex);
-            if(good)
-            {
-                if(! BEAST_EXPECTS(
-                    ! ex, ex.message()))
-                    return;
-            }
-            else
-            {
-                if(! BEAST_EXPECT(ex))
-                    return;
-            }
-        }
-
-        split_grind(s, ex);
-        throw_grind(s, ex);
-        fail_grind(s, ex);
-    }
-
-    void
-    good(string_view s)
-    {
-        grind(s, true);
+        for (const parse_options& po : configs)
+            grind(s, good, po);
     }
 
     void
     bad(string_view s)
     {
-        grind(s, false);
+        grind(s, false, parse_options());
     }
 
     void
-    testObject()
+    good(string_view s)
     {
-        good("{}");
-        good("{ }");
-        good("{ \t }");
-        good("{\"x\":null}");
-        good("{ \"x\":null}");
-        good("{\"x\" :null}");
-        good("{\"x\": null}");
-        good("{\"x\":null }");
-        good("{ \"x\" : null }");
-        good("{ \"x\" : {} }");
-        good("{ \"x\" : [] }");
-        good("{ \"x\" : { \"y\" : null } }");
-        good("{ \"x\" : [{}] }");
-        good("{ \"x\":1, \"y\":null}");
-        good("{\"x\":1,\"y\":2,\"z\":3}");
-        good(" {\"x\":1,\"y\":2,\"z\":3}");
-        good("{\"x\":1,\"y\":2,\"z\":3} ");
-        good(" {\"x\":1,\"y\":2,\"z\":3} ");
-        good("{ \"x\":1,\"y\":2,\"z\":3}");
-        good("{\"x\" :1,\"y\":2,\"z\":3}");
-        good("{\"x\":1 ,\"y\":2,\"z\":3}");
-        good("{\"x\":1,\"y\" :2,\"z\":3}");
-        good("{\"x\":1,\"y\": 2,\"z\":3}");
-        good("{\"x\":1,\"y\":2 ,\"z\":3}");
-        good("{\"x\":1,\"y\":2, \"z\":3}");
-        good("{\"x\":1,\"y\":2, \"z\" :3}");
-        good("{\"x\":1,\"y\":2, \"z\": 3}");
-        good("{\"x\":1,\"y\":2, \"z\":3 }");
-        good(" \t { \"x\" \n  :   1, \"y\" :2, \"z\" : 3} \n");
+        grind(s, true, parse_options());
+    }
 
-        good("[{\"x\":[{\"y\":null}]}]");
+    void
+    bad(
+        string_view s, 
+        const parse_options& po)
+    {
+        grind(s, false, po);
+    }
 
-        bad ("{");
-        bad (" {");
-        bad (" {}}");
-        bad ("{{}}");
-        bad ("{[]}");
+    void
+    good(
+        string_view s,
+        const parse_options& po)
+    {
+        grind(s, true, po);
+    }
+
+    void
+    bad_one(
+        string_view s,
+        const parse_options& po)
+    {
+        grind_one(s, false, po);
+    }
+
+    void
+    good_one(
+        string_view s,
+        const parse_options& po)
+    {
+        grind_one(s, true, po);
+    }
+    
+    void
+    bad_one(string_view s)
+    {
+        grind_one(s, false, parse_options());
+    }
+
+    void
+    good_one(string_view s)
+    {
+        grind_one(s, true, parse_options());
+    }
+
+    //------------------------------------------------------
+
+    void
+    testNull()
+    {
+        good("null");
+        good(" null");
+        good("null ");
+        good("\tnull");
+        good("null\t");
+        good("\r\n\t null\r\n\t ");
+
+        bad ("n     ");
+        bad ("nu    ");
+        bad ("nul   ");
+        bad ("n---  ");
+        bad ("nu--  ");
+        bad ("nul-  ");
+
+        bad ("NULL");
+        bad ("Null");
+        bad ("nulls");
+    }
+
+    void
+    testBoolean()
+    {
+        good("true");
+        good(" true");
+        good("true ");
+        good("\ttrue");
+        good("true\t");
+        good("\r\n\t true\r\n\t ");
+
+        bad ("t     ");
+        bad ("tr    ");
+        bad ("tru   ");
+        bad ("t---  ");
+        bad ("tr--  ");
+        bad ("tru-  ");
+        bad ("TRUE");
+        bad ("True");
+        bad ("truer");
+
+        good("false");
+        good(" false");
+        good("false ");
+        good("\tfalse");
+        good("false\t");
+        good("\r\n\t false\r\n\t ");
+
+        bad ("f     ");
+        bad ("fa    ");
+        bad ("fal   ");
+        bad ("fals  ");
+        bad ("f---- ");
+        bad ("fa--- ");
+        bad ("fal-- ");
+        bad ("fals- ");
+        bad ("FALSE");
+        bad ("False");
+        bad ("falser");
+    }
+
+    void
+    testString()
+    {
+        good(R"jv( "x"   )jv");
+        good(R"jv( "xy"  )jv");
+        good(R"jv( "x y" )jv");
+
+        // escapes
+        good(R"jv(" \" ")jv");
+        good(R"jv(" \\ ")jv");
+        good(R"jv(" \/ ")jv");
+        good(R"jv(" \b ")jv");
+        good(R"jv(" \f ")jv");
+        good(R"jv(" \n ")jv");
+        good(R"jv(" \r ")jv");
+        good(R"jv(" \t ")jv");
+
+        // utf-16 escapes
+        good(R"jv( " \u0000 "       )jv");
+        good(R"jv( " \ud7ff "       )jv");
+        good(R"jv( " \ue000 "       )jv");
+        good(R"jv( " \uffff "       )jv");
+        good(R"jv( " \ud800\udc00 " )jv");
+        good(R"jv( " \udbff\udfff " )jv");
+        good(R"jv( " \n\u0000     " )jv");
+
+        // escape in key
+        good(R"jv( {" \n":null} )jv");
+
+        // incomplete
+        bad ("\"");
+        
+        // illegal control character
+        bad ({ "\"" "\x00" "\"", 3 });
+        bad ("\"" "\x1f" "\"");
+        bad ("\"" "\\n" "\x1f" "\"");
+
+        // incomplete escape
+        bad (R"jv( "\" )jv");
+
+        // invalid escape
+        bad (R"jv( "\z" )jv");
+
+        // utf-16 escape, fast path,
+        // invalid surrogate
+        bad (R"jv( " \u----       " )jv");
+        bad (R"jv( " \ud---       " )jv");
+        bad (R"jv( " \ud8--       " )jv");
+        bad (R"jv( " \ud80-       " )jv");
+        // invalid low surrogate
+        bad (R"jv( " \ud800------ " )jv");
+        bad (R"jv( " \ud800\----- " )jv");
+        bad (R"jv( " \ud800\u---- " )jv");
+        bad (R"jv( " \ud800\ud--- " )jv");
+        bad (R"jv( " \ud800\udc-- " )jv");
+        bad (R"jv( " \ud800\udc0- " )jv");
+        // illegal leading surrogate
+        bad (R"jv( " \udc00       " )jv");
+        bad (R"jv( " \udfff       " )jv");
+        // illegal trailing surrogate
+        bad (R"jv( " \ud800\udbff " )jv");
+        bad (R"jv( " \ud800\ue000 " )jv");
+    }
+
+    void
+    testNumber()
+    {
+        good("0");
+        good("0                                ");
+        good("0e0                              ");
+        good("0E0                              ");
+        good("0e00                             ");
+        good("0E01                             ");
+        good("0e+0                             ");
+        good("0e-0                             ");
+        good("0.0                              ");
+        good("0.01                             ");
+        good("0.0e0                            ");
+        good("0.01e+0                          ");
+        good("0.02E-0                          ");
+        good("1                                ");
+        good("12                               ");
+        good("1e0                              ");
+        good("1E0                              ");
+        good("1e00                             ");
+        good("1E01                             ");
+        good("1e+0                             ");
+        good("1e-0                             ");
+        good("1.0                              ");
+        good("1.01                             ");
+        good("1.0e0                            ");
+        good("1.01e+0                          ");
+        good("1.02E-0                          ");
+        good("1.0");
+
+        good("-0                               ");
+        good("-0e0                             ");
+        good("-0E0                             ");
+        good("-0e00                            ");
+        good("-0E01                            ");
+        good("-0e+0                            ");
+        good("-0e-0                            ");
+        good("-0.0                             ");
+        good("-0.01                            ");
+        good("-0.0e0                           ");
+        good("-0.01e+0                         ");
+        good("-0.02E-0                         ");
+        good("-1                               ");
+        good("-12                              ");
+        good("-1                               ");
+        good("-1e0                             ");
+        good("-1E0                             ");
+        good("-1e00                            ");
+        good("-1E01                            ");
+        good("-1e+0                            ");
+        good("-1e-0                            ");
+        good("-1.0                             ");
+        good("-1.01                            ");
+        good("-1.0e0                           ");
+        good("-1.01e+0                         ");
+        good("-1.02E-0                         ");
+        good("-1.0");
+
+        good("1.1e309                          ");
+        good("9223372036854775807              ");
+        good("-9223372036854775807             ");
+        good("18446744073709551615             ");
+        good("-18446744073709551615            ");
+
+        good("1234567890123456");
+        good("-1234567890123456");
+        good("10000000000000000000000000");
+
+        good("0.900719925474099178             ");
+
+        // non-significant digits
+        good("1000000000000000000000000        ");
+        good("1000000000000000000000000e1      ");
+        good("1000000000000000000000000.0      ");
+        good("1000000000000000000000000.00     ");
+        good("1000000000000000000000000.000000000001");
+        good("1000000000000000000000000.0e1    ");
+        good("1000000000000000000000000.0      ");
+
+        good("1000000000.1000000000            ");
+
+        bad("");
+        bad("-                                 ");
+        bad("00                                ");
+        bad("01                                ");
+        bad("00.                               ");
+        bad("00.0                              ");
+        bad("-00                               ");
+        bad("-01                               ");
+        bad("-00.                              ");
+        bad("-00.0                             ");
+        bad("1a                                ");
+        bad("-a                                ");
+        bad(".                                 ");
+        bad("1.                                ");
+        bad("1+                                ");
+        bad("0.0+                              ");
+        bad("0.0e+                             ");
+        bad("0.0e-                             ");
+        bad("0.0e0-                            ");
+        bad("0.0e                              ");
+        bad("1eX                               ");
+        bad("1000000000000000000000000.e       ");
+        bad("0.");
+        bad("0.0e+");
+        bad("0.0e2147483648");
     }
 
     void
@@ -346,264 +562,142 @@ public:
         bad (" [");
         bad (" []]");
         bad ("[{]");
-        bad ("[ \"x\", ]");
+        bad (R"jv( [ null ; 1 ] )jv");
     }
 
     void
-    testString()
+    testObject()
     {
-        good("\""   "x"         "\"");
-        good("\""   "xy"        "\"");
-        good("\""   "x y"       "\"");
+        good("{}");
+        good("{ }");
+        good("{ \t }");
+        good("{\"x\":null}");
+        good("{ \"x\":null}");
+        good("{\"x\" :null}");
+        good("{\"x\": null}");
+        good("{\"x\":null }");
+        good("{ \"x\" : null }");
+        good("{ \"x\" : {} }");
+        good("{ \"x\" : [] }");
+        good("{ \"x\" : { \"y\" : null } }");
+        good("{ \"x\" : [{}] }");
+        good("{\"x\\ny\\u0022\":null}");
+        good("{ \"x\":1, \"y\":null}");
+        good("{\"x\":1,\"y\":2,\"z\":3}");
+        good(" {\"x\":1,\"y\":2,\"z\":3}");
+        good("{\"x\":1,\"y\":2,\"z\":3} ");
+        good(" {\"x\":1,\"y\":2,\"z\":3} ");
+        good("{ \"x\":1,\"y\":2,\"z\":3}");
+        good("{\"x\" :1,\"y\":2,\"z\":3}");
+        good("{\"x\":1 ,\"y\":2,\"z\":3}");
+        good("{\"x\":1,\"y\" :2,\"z\":3}");
+        good("{\"x\":1,\"y\": 2,\"z\":3}");
+        good("{\"x\":1,\"y\":2 ,\"z\":3}");
+        good("{\"x\":1,\"y\":2, \"z\":3}");
+        good("{\"x\":1,\"y\":2, \"z\" :3}");
+        good("{\"x\":1,\"y\":2, \"z\": 3}");
+        good("{\"x\":1,\"y\":2, \"z\":3 }");
+        good(" \t { \"x\" \n  :   1, \"y\" :2, \"z\" : 3} \n");
 
-        bad ("\""   "\t"        "\"");
+        good("[{\"x\":[{\"y\":null}]}]");
 
-        // control after escape
-        bad ("\"\\\\\n\"");
-    }
+        bad ("{");
+        bad (" {");
+        bad (" {}}");
+        bad ("{{}}");
+        bad ("{[]}");
 
-    void
-    testNumber()
-    {
-        good("0");
-        good("0.0");
-        good("0.10");
-        good("0.01");
-        good("1");
-        good("10");
-        good("1.5");
-        good("10.5");
-        good("10.25");
-        good("10.25e0");
-        good("1e1");
-        good("1e10");
-        good("1e+0");
-        good("1e+1");
-        good("0e+10");
-        good("0e-0");
-        good("0e-1");
-        good("0e-10");
-        good("1E+1");
-        good("-0");
-        good("-1");
-        good("-1e1");
-        good("1.1e309");
-        good(   "9223372036854775807");
-        good(  "-9223372036854775807");
-        good(  "18446744073709551615");
-        good( "-18446744073709551615");
-        good(  "[9223372036854775807]");
-        good( "[-9223372036854775807]");
-        good( "[18446744073709551615]");
-        good("[-18446744073709551615]");
-
-        bad ("");
-        bad ("-");
-        bad ("00");
-        bad ("00.");
-        bad ("00.0");
-        bad ("1a");
-        bad (".");
-        bad ("1.");
-        bad ("1+");
-        bad ("0.0+");
-        bad ("0.0e+");
-        bad ("0.0e-");
-        bad ("0.0e0-");
-        bad ("0.0e");
-    }
-
-    void
-    testBoolean()
-    {
-        good("true");
-        good(" true");
-        good("true ");
-        good("\ttrue");
-        good("true\t");
-        good("\r\n\t true\r\n\t ");
-
-        bad ("TRUE");
-        bad ("tRUE");
-        bad ("trUE");
-        bad ("truE");
-        bad ("truex");
-        bad ("tru");
-        bad ("tr");
-        bad ("t");
-
-        good("false");
-        good(" false");
-        good("false ");
-        good("\tfalse");
-        good("false\t");
-        good("\r\n\t false\r\n\t ");
-
-        bad ("FALSE");
-        bad ("fALSE");
-        bad ("faLSE");
-        bad ("falSE");
-        bad ("falsE");
-        bad ("falsex");
-        bad ("fals");
-        bad ("fal");
-        bad ("fa");
-        bad ("f");
-    }
-
-    void
-    testNull()
-    {
-        good("null");
-        good(" null");
-        good("null ");
-        good("\tnull");
-        good("null\t");
-        good("\r\n\t null\r\n\t ");
-
-        bad ("NULL");
-        bad ("nULL");
-        bad ("nuLL");
-        bad ("nulL");
-        bad ("nullx");
-        bad ("nul");
-        bad ("nu");
-        bad ("n");
+        bad (R"jv( {"x";null} )jv");
+        bad (R"jv( {"x":null . "y":0} )jv");
     }
 
     void
     testParser()
     {
         auto const check =
-        []( string_view s,
-            bool is_done)
+        [this]( string_view s,
+            bool is_complete)
         {
             fail_parser p;
             error_code ec;
             p.write_some(
+                true,
                 s.data(), s.size(),
                 ec);
-            if(! BEAST_EXPECTS(! ec,
-                ec.message()))
+            if(! BOOST_TEST(! ec))
+            {
+                log << "    failed to parse: " << s << '\n';
                 return;
-            BEAST_EXPECT(is_done ==
-                p.is_done());
+            }
+            BOOST_TEST(is_complete ==
+                p.is_complete());
         };
 
-        // is_done()
+        // is_complete()
 
-        check("{}", false);
-        check("{} ", false);
+        check("{}", true);
+        check("{} ", true);
         check("{}x", true);
         check("{} x", true);
 
-        check("[]", false);
-        check("[] ", false);
+        check("[]", true);
+        check("[] ", true);
         check("[]x", true);
         check("[] x", true);
 
-        check("\"a\"", false);
-        check("\"a\" ", false);
+        check("\"a\"", true);
+        check("\"a\" ", true);
         check("\"a\"x", true);
         check("\"a\" x", true);
 
         check("0", false);
-        check("0 ", false);
+        check("0 ", true);
         check("0x", true);
         check("0 x", true);
-        check("00", true);
         check("0.", false);
         check("0.0", false);
-        check("0.0 ", false);
+        check("0.0 ", true);
         check("0.0 x", true);
 
-        check("true", false);
-        check("true ", false);
+        check("true", true);
+        check("true ", true);
         check("truex", true);
         check("true x", true);
 
-        check("false", false);
-        check("false ", false);
+        check("false", true);
+        check("false ", true);
         check("falsex", true);
         check("false x", true);
 
-        check("null", false);
-        check("null ", false);
+        check("null", true);
+        check("null ", true);
         check("nullx", true);
         check("null x", true);
 
-        // depth(), max_depth(), is_done()
+        // flush
         {
-            {
-                error_code ec;
-                fail_parser p;
-                BEAST_EXPECT(
-                    p.depth() == 0);
-                BEAST_EXPECT(
-                    p.max_depth() > 0);
-                p.max_depth(1);
-                p.write("[{}]", 4, ec);
-                BEAST_EXPECTS(
-                    ec == error::too_deep,
-                    ec.message());
-                BEAST_EXPECT(! p.is_done());
-            }
-            {
-                error_code ec;
-                fail_parser p;
-                BEAST_EXPECT(
-                    p.max_depth() > 0);
-                p.max_depth(1);
-                p.write_some("[", 1, ec);
-                BEAST_EXPECT(p.depth() == 1);
-                if(BEAST_EXPECTS(! ec,
-                    ec.message()))
-                {
-                    p.write_some("{", 1, ec);
-                    BEAST_EXPECTS(
-                        ec == error::too_deep,
-                        ec.message());
-                }
-                BEAST_EXPECT(! p.is_done());
-                ec = {};
-                p.write_some("{}", 2, ec);
-                BEAST_EXPECT(ec);
-                p.reset();
-                p.write("{}", 2, ec);
-                if(! ec)
-                    p.finish(ec);
-                BEAST_EXPECTS(! ec, ec.message());
-                BEAST_EXPECT(p.is_done());
-            }
-        }
-
-        // maybe_flush
-        {
-            // VFALCO This must be equal to the size
-            // of the temp buffer used in write_some.
-            //
-            int constexpr BUFFER_SIZE = 2048;
-
             {
                 for(auto esc :
                     { "\\\"", "\\\\", "\\/", "\\b",
-                      "\\f", "\\n", "\\r", "\\t", "\\u0000" })
+                      "\\f", "\\n", "\\r", "\\t", "\\u0000"
+                    })
                 {
-                    std::string big;
-                    big = "\\\"" + std::string(BUFFER_SIZE-4, '*') + esc;
-                    std::string s;
-                    s = "{\"" + big + "\":\"" + big + "\"}";
-                    fail_grind(s);
+                    std::string const big =
+                        "\\\"" + std::string(
+                        BOOST_JSON_PARSER_BUFFER_SIZE-4, '*') + esc;
+                    std::string const s =
+                        "{\"" + big + "\":\"" + big + "\"}";
+                    good_one(s);
                 }
             }
-
             {
                 std::string big;
                 big = "\\\"" +
-                    std::string(BUFFER_SIZE + 1, '*');
+                    std::string(
+                        BOOST_JSON_PARSER_BUFFER_SIZE+ 1, '*');
                 std::string s;
                 s = "{\"" + big + "\":\"" + big + "\"}";
-                fail_grind(s);
+                good_one(s);
             }
         }
 
@@ -611,135 +705,80 @@ public:
         {
             error_code ec;
             fail_parser p;
-            p.finish(ec);
-            BEAST_EXPECT(ec);
+            p.write(false, nullptr, 0, ec);
+            BOOST_TEST(ec);
         }
     }
 
     void
     testMembers()
     {
-        // write_some(char const*, size_t, error_code&)
+        fail_parser p;
+        std::size_t n;
+        error_code ec;
+        n = p.write_some(true, "null", 4, ec );
+        if(BOOST_TEST(! ec))
         {
-            {
-                error_code ec;
-                fail_parser p;
-                p.write_some("0", 1, ec);
-                BEAST_EXPECTS(! ec, ec.message());
-            }
-
-            // partial write
-            {
-                error_code ec;
-                fail_parser p;
-                auto const n =
-                    p.write_some("null x", 6, ec);
-                BEAST_EXPECTS(! ec, ec.message());
-                BEAST_EXPECT(n < 6);
-            }
+            BOOST_TEST(n == 4);
+            BOOST_TEST(p.is_complete());
+            n = p.write_some(false, " \t42", 4, ec);
+            BOOST_TEST(n == 2);
+            BOOST_TEST(! ec);
         }
-
-        // write_some(char const*, size_t)
+        p.reset();
+        n = p.write_some(false, "[1,2,3]", 7, ec);
+        if(BOOST_TEST(! ec))
         {
-            fail_parser p;
-            BEAST_THROWS(
-                p.write_some("x", 1),
-                system_error);
-        }
-
-        // write(char const*, size_t, error_code&)
-        {
-            error_code ec;
-            fail_parser p;
-            p.write("0x", 2, ec);
-            BEAST_EXPECTS(
-                ec == error::extra_data,
-                ec.message());
-        }
-
-        // write(char const*, size_t)
-        {
-            {
-                fail_parser p;
-                p.write("0", 1);
-            }
-
-            {
-                fail_parser p;
-                BEAST_THROWS(
-                    p.write("0x", 2),
-                    system_error);
-            }
-        }
-
-        // finish(char const*, size_t, error_code&)
-        {
-            error_code ec;
-            fail_parser p;
-            p.finish("{", 1, ec);
-            BEAST_EXPECTS(
-                ec == error::incomplete,
-                ec.message());
-        }
-
-        // finish(char const*, size_t)
-        {
-            {
-                fail_parser p;
-                p.finish("{}", 2);
-            }
-
-            {
-                fail_parser p;
-                BEAST_THROWS(
-                    p.finish("{", 1),
-                    system_error);
-            }
-        }
-
-        // finish()
-        {
-            {
-                fail_parser p;
-                p.write("{}", 2);
-                BEAST_EXPECT(! p.is_done());
-                p.finish();
-                BEAST_EXPECT(p.is_done());
-            }
-
-            {
-                fail_parser p;
-                p.write("{", 1);
-                BEAST_EXPECT(! p.is_done());
-                BEAST_THROWS(
-                    p.finish(),
-                    system_error);
-            }
+            BOOST_TEST(n == 7);
+            BOOST_TEST(p.is_complete());
         }
     }
 
     void
     testParseVectors()
     {
+        std::vector<parse_options> all_configs =
+        {
+            make_options(false, false, true),
+            make_options(true, false, true),
+            make_options(false, true, true),
+            make_options(true, true, true),
+            make_options(false, false, false),
+            make_options(true, false, false),
+            make_options(false, true, false),
+            make_options(true, true, false)
+        };
         parse_vectors pv;
         for(auto const& v : pv)
         {
-            if(v.result == 'i')
+            // skip these , because basic_parser
+            // doesn't have a max_depth setting.
+            if( v.name == "structure_100000_opening_arrays" ||
+                v.name == "structure_open_array_object")
             {
-                error_code ec;
-                fail_parser p;
-                p.write(
-                    v.text.data(),
-                    v.text.size(),
-                    ec);
-                grind(v.text,
-                    ec ? false : true);
                 continue;
             }
-            if(v.result == 'y')
-                grind(v.text, true);
-            else
-                grind(v.text, false);
+            for (const parse_options& po : all_configs)
+            {
+                if(v.result == 'i')
+                {
+                    error_code ec;
+                    fail_parser p(po);
+                    p.write(
+                        false,
+                        v.text.data(),
+                        v.text.size(),
+                        ec);
+                    if(! ec)
+                        good_one(v.text, po);
+                    else
+                        bad_one(v.text, po);
+                }
+                else if(v.result == 'y')
+                    good_one(v.text, po);
+                else
+                    bad_one(v.text, po);
+            }
         }
     }
 
@@ -797,28 +836,556 @@ public:
         base64::decode(
             p.get(), s.data(), s.size());
         string_view const js(p.get(), len);
-        BEAST_EXPECT(! validate(js));
+        BOOST_TEST(! validate(js));
     }
 
     void
-    run() override
+    testIssue113()
     {
-        testObject();
-        testArray();
+        string_view s = 
+            "\"\\r\\n section id='description'>\\r\\nAll        mbers form the uncountable set "
+            "\\u211D.  Among its subsets, relatively simple are the convex sets, each expressed "
+            "as a range between two real numbers <i>a</i> and <i>b</i> where <i>a</i> \\u2264 <i>"
+            "b</i>.  There are actually four cases for the meaning of \\\"between\\\", depending "
+            "on open or closed boundary:\\r\\n\\r\\n<ul>\\r\\n  <li>[<i>a</i>, <i>b</i>]: {<i>"
+            "x</i> | <i>a</i> \\u2264 <i>x</i> and <i>x</i> \\u2264 <i>b</i> }</li>\\r\\n  <li>"
+            "(<i>a</i>, <i>b</i>): {<i>x</i> | <i>a</i> < <i>x</i> and <i>x</i> < <i>b</i> }"
+            "</li>\\r\\n  <li>[<i>a</i>, <i>b</i>): {<i>x</i> | <i>a</i> \\u2264 <i>x</i> and "
+            "<i>x</i> < <i>b</i> }</li>\\r\\n  <li>(<i>a</i>, <i>b</i>]: {<i>x</i> | <i>a</i> "
+            "< <i>x</i> and <i>x</i> \\u2264 <i>b</i> }</li>\\r\\n</ul>\\r\\n\\r\\nNote that "
+            "if <i>a</i> = <i>b</i>, of the four only [<i>a</i>, <i>a</i>] would be non-empty."
+            "\\r\\n\\r\\n<strong>Task</strong>\\r\\n\\r\\n<ul>\\r\\n  <li>Devise a way to "
+            "represent any set of real numbers, for the definition of \\\"any\\\" in the "
+            "implementation notes below.</li>\\r\\n  <li>Provide methods for these common "
+            "set operations (<i>x</i> is a real number; <i>A</i> and <i>B</i> are sets):</li>"
+            "\\r\\n  <ul>\\r\\n    <li>\\r\\n      <i>x</i> \\u2208 <i>A</i>: determine if <i>"
+            "x</i> is an element of <i>A</i><br>\\r\\n      example: 1 is in [1, 2), while 2, "
+            "3, ... are not.\\r\\n    </li>\\r\\n    <li>\\r\\n      <i>A</i> \\u222A <i>B</i>: "
+            "union of <i>A</i> and <i>B</i>, i.e. {<i>x</i> | <i>x</i> \\u2208 <i>A</i> or <i>x"
+            "</i> \\u2208 <i>B</i>}<br>\\r\\n      example: [0, 2) \\u222A (1, 3) = [0, 3); "
+            "[0, 1) \\u222A (2, 3] = well, [0, 1) \\u222A (2, 3]\\r\\n    </li>\\r\\n    <li>"
+            "\\r\\n      <i>A</i> \\u2229 <i>B</i>: intersection of <i>A</i> and <i>B</i>, i.e. "
+            "{<i>x</i> | <i>x</i> \\u2208 <i>A</i> and <i>x</i> \\u2208 <i>B</i>}<br>\\r\\n      "
+            "example: [0, 2) \\u2229 (1, 3) = (1, 2); [0, 1) \\u2229 (2, 3] = empty set\\r\\n    "
+            "</li>\\r\\n    <li>\\r\\n      <i>A</i> - <i>B</i>: difference between <i>A</i> and "
+            "<i>B</i>, also written as <i>A</i> \\\\ <i>B</i>, i.e. {<i>x</i> | <i>x</i> \\u2208 "
+            "<i>A</i> and <i>x</i> \\u2209 <i>B</i>}<br>\\r\\n      example: [0, 2) \\u2212 (1, "
+            "3) = [0, 1]\\r\\n    </li>\\r\\n  </ul>\\r\\n</ul>\\r\\n</section>\\r\\n\"\n";
+        good_one(s);
+    }
+
+    void
+    testComments()
+    {
+        parse_options disabled;
+        parse_options enabled;
+        enabled.allow_comments = true;
+
+        const auto replace_and_test = 
+            [&](string_view s)
+        {
+            static std::vector<string_view> comments =
+            {
+                "//\n",
+                "//    \n",
+                "//aaaa\n",
+                "//    aaaa\n",
+                "//    /* \n",
+                "//    /**/ \n",
+                "/**/",
+                "/*//*/",
+                "/*/*/",
+                "/******/",
+                "/***    ***/",
+                "/**aaaa***/",
+                "/***    aaaa***/"
+            };
+
+            class comment_parser : public basic_parser
+            {
+                friend class basic_parser;
+
+            public:
+                std::string captured = "";
+
+                comment_parser() 
+                    : basic_parser(make_options(true, false, false)) { }
+
+                ~comment_parser() {}
+                bool on_document_begin( error_code& ) { return true; }
+                bool on_document_end( error_code& ) { return true; }
+                bool on_object_begin( error_code& ) { return true; }
+                bool on_object_end( error_code& ) { return true; }
+                bool on_array_begin( error_code& ) { return true; }
+                bool on_array_end( error_code& ) { return true; }
+                bool on_key_part( string_view, error_code& ) { return true; }
+                bool on_key( string_view, error_code& ) { return true; }
+                bool on_string_part( string_view, error_code& ) { return true; }
+                bool on_string( string_view, error_code& ) { return true; }
+                bool on_number_part( string_view, error_code&) { return true; }
+                bool on_int64( std::int64_t, string_view, error_code& ) { return true; }
+                bool on_uint64( std::uint64_t, string_view, error_code& ) { return true; }
+                bool on_double( double, string_view, error_code& ) { return true; }
+                bool on_bool( bool, error_code& ) { return true; }
+                bool on_null( error_code& ) { return true; }
+                bool on_comment_part( string_view s, error_code& )
+                { 
+                    captured.append(s.data(), s.size());
+                    return true; 
+                }
+                bool on_comment( string_view s, error_code& ) 
+                { 
+                    captured.append(s.data(), s.size());
+                    return true; 
+                }
+        
+                std::size_t
+                write(
+                    char const* data,
+                    std::size_t size,
+                    error_code& ec)
+                {
+                    auto const n =
+                        basic_parser::write_some(
+                        *this, false, data, size, ec);
+                    if(! ec && n < size)
+                        ec = error::extra_data;
+                    return n;
+                }
+            };
+
+            std::string formatted = "";
+            std::string just_comments = "";
+            std::size_t guess = std::count(
+                s.begin(), s.end(), '@') * 12;
+            formatted.reserve(guess + s.size());
+            just_comments.reserve(guess);
+            std::size_t n = 0;
+            for (char c : s)
+            {
+                if (c == '@')
+                {
+                    string_view com = 
+                        comments[((formatted.size() + n) % s.size()) % comments.size()];
+                    formatted.append(com.data(), n = com.size());
+                    just_comments.append(com.data(), com.size());
+                    continue;
+                }
+                formatted += c;
+            }
+            bad(formatted, disabled);
+            good(formatted, enabled);
+
+            {
+                // test the handler
+                comment_parser p;
+                error_code ec;
+                p.write( formatted.data(), formatted.size(), ec );
+                BOOST_TEST(! ec);
+                BOOST_TEST(p.captured == just_comments);
+            }
+        };
+
+        replace_and_test("@1");
+        replace_and_test("1@");
+        replace_and_test("@1@");
+        replace_and_test("[@1]");
+        replace_and_test("[1@]");
+        replace_and_test("[1,2@]");
+        replace_and_test("[1,@2]");
+        replace_and_test("[1@,2]");
+        replace_and_test("@[@1@,@2@]@");
+        replace_and_test("{@\"a\":1}");
+        replace_and_test("{\"a\"@:1}");
+        replace_and_test("{\"a\":1@}");
+        replace_and_test("{\"a\":1@,\"b\":2}");
+        replace_and_test("{\"a\":1,@\"b\":2}");
+        replace_and_test("@{@\"a\"@:@1@,@\"b\"@:@2@}");
+
+        // no following token
+        bad("1/", enabled);
+        // bad second token
+        bad("1/x", enabled);
+        // no comment close
+        bad("1/*", enabled);
+        bad("1/**", enabled);
+        bad("[1 //, 2]", enabled);
+
+        // just comment
+        bad("//\n", enabled);
+        bad("//", enabled);
+        bad("/**/", enabled);
+
+        // no newline at EOF
+        good("1//", enabled);
+    }
+
+    void
+    testAllowTrailing()
+    {
+        parse_options disabled;
+        parse_options enabled;
+        enabled.allow_trailing_commas = true;
+
+        bad("[1,]", disabled);
+        good("[1,]", enabled);
+
+        bad("[1,[],]", disabled);
+        good("[1,[],]", enabled);
+
+        bad("[1,{},]", disabled);
+        good("[1,{},]", enabled);
+
+        bad("[1,{\"a\":1,},]", disabled);
+        good("[1,{\"a\":1,},]", enabled);
+
+        bad("{\"a\":1,}", disabled);
+        good("{\"a\":1,}", enabled);
+
+        bad("{\"a\":[1,],}", disabled);
+        good("{\"a\":[1,],}", enabled);
+
+        bad("{\"a\":[],}", disabled);
+        good("{\"a\":[],}", enabled);
+
+        bad("{\"a\":[{}, [1,]],}", disabled);
+        good("{\"a\":[{}, [1,]],}", enabled);
+
+        bad("[[[[[[[],],],],],],]", disabled);
+        good("[[[[[[[],],],],],],]", enabled);
+
+        bad("{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{},},},},},},}", disabled);
+        good("{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{},},},},},},}", enabled);
+    }
+
+    void
+    testUTF8Validation()
+    {
+        good("\"\xc2\x80----------\"");
+        good("\"\xc2\xbf----------\"");
+        good("\"\xdf\x80----------\"");
+        good("\"\xdf\xbf----------\"");
+
+        good("\"\xcf\x90----------\"");
+
+        good("\"\xe0\xa0\x80----------\"");
+        good("\"\xe0\xa0\xbf----------\"");
+        good("\"\xe0\xbf\x80----------\"");
+        good("\"\xe0\xbf\xbf----------\"");
+
+        good("\"\xe0\xb0\x90----------\"");
+
+        good("\"\xe1\x80\x80----------\"");
+        good("\"\xe1\xbf\x80----------\"");
+        good("\"\xec\x80\x80----------\"");
+        good("\"\xec\xbf\x80----------\"");
+        good("\"\xe1\x80\xbf----------\"");
+        good("\"\xe1\xbf\xbf----------\"");
+        good("\"\xec\x80\xbf----------\"");
+        good("\"\xec\xbf\xbf----------\"");
+
+        good("\"\xe6\x90\x90----------\"");
+
+        good("\"\xed\x80\x80----------\"");
+        good("\"\xed\x80\xbf----------\"");
+        good("\"\xed\x9f\x80----------\"");
+        good("\"\xed\x9f\xbf----------\"");
+
+        good("\"\xed\x90\x90----------\"");
+
+        good("\"\xee\x80\x80----------\"");
+        good("\"\xee\xbf\x80----------\"");
+        good("\"\xef\x80\x80----------\"");
+        good("\"\xef\xbf\x80----------\"");
+        good("\"\xee\x80\xbf----------\"");
+        good("\"\xee\xbf\xbf----------\"");
+        good("\"\xef\x80\xbf----------\"");
+        good("\"\xef\xbf\xbf----------\"");
+
+        good("\"\xee\x90\x90----------\"");
+        good("\"\xef\x90\x90----------\"");
+
+        good("\"\xf0\x90\x80\x80----------\"");
+        good("\"\xf0\x90\xbf\x80----------\"");
+        good("\"\xf0\x90\xbf\xbf----------\"");
+        good("\"\xf0\x90\x80\xbf----------\"");
+        good("\"\xf0\xbf\x80\x80----------\"");
+        good("\"\xf0\xbf\xbf\x80----------\"");
+        good("\"\xf0\xbf\xbf\xbf----------\"");
+        good("\"\xf0\xbf\x80\xbf----------\"");
+
+        good("\"\xf0\xA0\x90\x90----------\"");
+
+        good("\"\xf4\x80\x80\x80----------\"");
+        good("\"\xf4\x80\xbf\x80----------\"");
+        good("\"\xf4\x80\xbf\xbf----------\"");
+        good("\"\xf4\x80\x80\xbf----------\"");
+        good("\"\xf4\x8f\x80\x80----------\"");
+        good("\"\xf4\x8f\xbf\x80----------\"");
+        good("\"\xf4\x8f\xbf\xbf----------\"");
+        good("\"\xf4\x8f\x80\xbf----------\"");
+
+        good("\"\xf4\x88\x90\x90----------\"");
+
+        good("\"\xf1\x80\x80\x80----------\"");
+        good("\"\xf1\x80\xbf\x80----------\"");
+        good("\"\xf1\x80\xbf\xbf----------\"");
+        good("\"\xf1\x80\x80\xbf----------\"");
+        good("\"\xf1\xbf\x80\x80----------\"");
+        good("\"\xf1\xbf\xbf\x80----------\"");
+        good("\"\xf1\xbf\xbf\xbf----------\"");
+        good("\"\xf1\xbf\x80\xbf----------\"");
+        good("\"\xf3\x80\x80\x80----------\"");
+        good("\"\xf3\x80\xbf\x80----------\"");
+        good("\"\xf3\x80\xbf\xbf----------\"");
+        good("\"\xf3\x80\x80\xbf----------\"");
+        good("\"\xf3\xbf\x80\x80----------\"");
+        good("\"\xf3\xbf\xbf\x80----------\"");
+        good("\"\xf3\xbf\xbf\xbf----------\"");
+        good("\"\xf3\xbf\x80\xbf----------\"");
+
+        good("\"\xf2\x90\x90\x90----------\"");
+
+        bad("\"\xc0\x80----------\"");
+        bad("\"\xc2\xc0----------\"");
+        bad("\"\xef\x80----------\"");
+        bad("\"\xdf\x70----------\"");
+
+        bad("\"\xff\x90----------\"");
+
+        bad("\"\xe0\x9f\x80----------\"");
+        bad("\"\xe0\xa0\xfe----------\"");
+        bad("\"\xc0\xff\xff----------\"");
+        bad("\"\xc0\xbf\x76----------\"");
+
+        bad("\"\xe0\xde\x90----------\"");
+
+        bad("\"\xe1\x80\x7f----------\"");
+        bad("\"\xe1\x7f\x80----------\"");
+        bad("\"\xec\xff\x80----------\"");
+        bad("\"\xef\x7f\x80----------\"");
+        bad("\"\xe1\x80\xff----------\"");
+        bad("\"\xe1\xbf\x0f----------\"");
+        bad("\"\xec\x01\xff----------\"");
+        bad("\"\xec\xff\xff----------\"");
+
+        bad("\"\xe6\x60\x90----------\"");
+
+        bad("\"\xed\x7f\x80----------\"");
+        bad("\"\xed\xa0\xbf----------\"");
+        bad("\"\xed\xbf\x80----------\"");
+        bad("\"\xed\x9f\x7f----------\"");
+
+        bad("\"\xed\xce\xbf----------\"");
+
+        bad("\"\xee\x7f\x80----------\"");
+        bad("\"\xee\xcc\x80----------\"");
+        bad("\"\xef\x80\xcc----------\"");
+        bad("\"\xef\xbf\x0a----------\"");
+        bad("\"\xee\x50\xbf----------\"");
+        bad("\"\xee\xef\xbf----------\"");
+        bad("\"\xef\xf0\xff----------\"");
+        bad("\"\xef\xaa\xee----------\"");
+
+        bad("\"\xc0\x90\x90----------\"");
+        bad("\"\xc1\x90\x90----------\"");
+
+        bad("\"\xff\x90\x80\x80----------\"");
+        bad("\"\xfe\x90\xbf\x80----------\"");
+        bad("\"\xfd\x90\xbf\xbf----------\"");
+        bad("\"\xf0\xff\x80\xbf----------\"");
+        bad("\"\xf0\xfe\x80\x80----------\"");
+        bad("\"\xf0\xfd\xbf\x80----------\"");
+        bad("\"\xf0\x90\x80\xff----------\"");
+        bad("\"\xf0\x90\x5f\x80----------\"");
+
+        bad("\"\xf4\x70\x80\x80----------\"");
+        bad("\"\xf4\x80\x70\x80----------\"");
+        bad("\"\xf4\x80\xbf\x70----------\"");
+        bad("\"\xf4\xce\x80\xbf----------\"");
+        bad("\"\xf4\x8f\xce\x80----------\"");
+        bad("\"\xf4\x8f\xbf\xce----------\"");
+
+        bad("\"\xf1\x7f\xbf\xbf----------\"");
+        bad("\"\xf2\x80\x7f\xbf----------\"");
+        bad("\"\xf3\x80\xbf\xce----------\"");
+
+        // utf8 after escape
+        good("\"\\u0000 \xf3\xbf\x80\xbf\xf3\xbf\x80\xbf\"");
+        good("\"\\ud7ff\xf4\x80\xbf\xbf       \"");
+        good("\"\\ue000            \xef\xbf\x80\"");
+        good("\"\xef\xbf\x80 \\uffff \xef\xbf\x80\"");
+        good("\"\xc2\x80\xc2\x80\xc2\x80\xc2\x80\xc2\x80\\ud800\\udc00 \"");
+        good("\"\\udbff\\udfff \xe1\x80\xbf  \\udbff\\udfff \xe1\x80\xbf\"");
+        good("\"\\u0000\xe1\x80\xbf     \"");
+        bad("\"\\t\\t\xf4\x70\x80\x80----------\"");
+        bad("\"\\n\xf4\x80\x70\x80----------\"");
+        bad("\"\\n\xf4\x80\xbf\x70-\\n\xf4\x80\xbf\x70\"");
+    }
+
+    void
+    testMaxDepth()
+    {
+        {
+            string_view s = "[[[[[]]]]]";
+            null_parser p;
+            error_code ec;
+            p.max_depth(4);
+            p.write(s.data(), s.size(), ec);
+            BOOST_TEST(ec == error::too_deep);
+        }
+        {
+            string_view s = 
+                "{\"a\":{\"b\":{\"c\":{\"d\":{}}}}}";
+            null_parser p;
+            error_code ec;
+            p.max_depth(4);
+            p.write(s.data(), s.size(), ec);
+            BOOST_TEST(ec == error::too_deep);
+        }
+    }
+
+    void
+    testNumberLiteral()
+    {
+        class literal_parser : public basic_parser
+        {
+            friend class basic_parser;
+
+            bool on_document_begin( error_code& ) { return true; }
+            bool on_document_end( error_code& ) { return true; }
+            bool on_object_begin( error_code& ) { return true; }
+            bool on_object_end( error_code& ) { return true; }
+            bool on_array_begin( error_code& ) { return true; }
+            bool on_array_end( error_code& ) { return true; }
+            bool on_key_part( string_view, error_code& ) { return true; }
+            bool on_key( string_view, error_code& ) { return true; }
+            bool on_string_part( string_view, error_code& ) { return true; }
+            bool on_string( string_view, error_code& ) { return true; }
+            bool on_number_part( string_view sv, error_code&) 
+            { 
+                captured.append(sv.data(), sv.size());
+                return true; 
+            }
+            bool on_int64( std::int64_t, string_view sv, error_code& )
+            { 
+                captured.append(sv.data(), sv.size());
+                captured += 's';
+                return true; 
+            }
+            bool on_uint64( std::uint64_t, string_view sv, error_code& ) 
+            { 
+                captured.append(sv.data(), sv.size());
+                captured += 'u';
+                return true; 
+            }
+            bool on_double( double, string_view sv, error_code& )
+            { 
+                captured.append(sv.data(), sv.size());
+                captured += 'd';
+                return true; 
+            }
+            bool on_bool( bool, error_code& ) { return true; }
+            bool on_null( error_code& ) { return true; }
+            bool on_comment_part( string_view, error_code& ) { return true; }
+            bool on_comment( string_view, error_code& ) { return true; }
+
+        public:
+            std::string captured = "";
+
+            literal_parser() 
+                : basic_parser(make_options(true, false, false)) { }
+
+            ~literal_parser() {}
+        
+            std::size_t
+            write(
+                bool more,
+                char const* data,
+                std::size_t size,
+                error_code& ec)
+            {
+                auto const n =
+                    basic_parser::write_some(
+                    *this, more, data, size, ec);
+                if(! ec && n < size)
+                    ec = error::extra_data;
+                return n;
+            }
+        };
+
+        const auto check =
+            [](string_view expected)
+        {
+            string_view sv = expected;
+            sv.remove_suffix(1);
+            for(std::size_t i = 0; 
+                i < sv.size(); ++i)
+            {
+                literal_parser p;
+                error_code ec;
+                if(i != 0)
+                {
+                    p.write(true, 
+                        sv.data(), i, ec);
+                }
+                if(BOOST_TEST(! ec))
+                {
+                    p.write(false, 
+                        sv.data() + i,
+                        sv.size() - i, ec);
+                }
+                BOOST_TEST(! ec);
+                BOOST_TEST(p.captured == expected);
+            }
+        };
+
+        check("1s");
+        check("-1s");
+        check("0s");
+        check("0s");
+        check("123456s");
+        check("-123456s");
+        check("9223372036854775808u");
+
+        check("1.0d");
+        check("-1.0d");
+        check("0.0d");
+        check("1.0e3d");
+        check("1e1d");
+        check("1e+1d");
+        check("1e-1d");
+        check("-100000000000000000000000d");
+        check("100000000000000000000000d");
+        check("10000000000.10000000000000d");
+        check("-10000000000.10000000000000d");
+        check("1000000000000000.0e1000000d");
+    }
+
+    void
+    run()
+    {
+        testNull();
+        testBoolean();
         testString();
         testNumber();
-        testBoolean();
-        testNull();
+        testArray();
+        testObject();
         testParser();
         testMembers();
         testParseVectors();
-
         testIssue13();
         testIssue20();
+        testIssue113();
+        testAllowTrailing();
+        testComments();
+        testUTF8Validation();
+        testMaxDepth();
+        testNumberLiteral();
     }
 };
 
-BEAST_DEFINE_TESTSUITE(boost,json,basic_parser);
+TEST_SUITE(basic_parser_test, "boost.json.basic_parser");
 
 } // json
 } // boost

@@ -4,7 +4,7 @@
     Distributed under the Boost Software License, Version 1.0. (See accompanying
     file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 
-    Official repository: https://github.com/vinniefalco/json
+    Official repository: https://github.com/cppalliance/json
 ]
 
 [section Benchmarks]
@@ -23,7 +23,7 @@ tests these implementations:
 ][
     [[*boost(pool)]]
     [
-        Parses the input using a __pool__, which is optimized
+        Parses the input using a __monotonic_resource__, which is optimized
         for parsing but not subsequent modification.
         The __parser__ object is reused between
         trials, allowing temporary memory allocated by the
@@ -33,7 +33,7 @@ tests these implementations:
 ][
     [[*boost]]
     [
-        Parses the input using the default storage, which
+        Parses the input using the default memory resource, which
         uses global operator `new` and `delete`, and is designed
         for general use including mutation of the document
         after it is parsed.
@@ -95,44 +95,56 @@ The input files, available in the bench/data directory, are laid out thusly:
     [Size]
     [Description]
 ][
-    [[*array.json]]
+    [[link json.benchmarks.parse_array_json [*array.json]]]
     [667KB]
     [
         A single array with random values and words.
     ]
 ][
-    [[*canada.json]]
+    [[link json.benchmarks.parse_canada_json [*canada.json]]]
     [2.14MB]
     [
         The largest file, containing a huge number of 2-element
         arrays holding floating-point coordinate pairs.
     ]
 ][
-    [[*citm_catalog]]
+    [[link json.benchmarks.parse_citm_catalog_json [*citm_catalog.json]]]
     [1.69MB]
     [
         A large JSON with a variety of nesting, types, and lengths.
     ]
 ][
-    [[*random.json]]
+    [[link json.benchmarks.parse_integers_32_json [*integers-32.json]]]
+    [1,353KB]
+    [
+        One array with random 32-bit integers.
+    ]
+][
+    [[link json.benchmarks.parse_integers_64_json [*integers-64.json]]]
+    [596KB]
+    [
+        One array with random 64-bit integers.
+    ]
+][
+    [[link json.benchmarks.parse_random_json [*random.json]]]
     [2,244 bytes]
     [
         Holds a randomly generated JSON with assorted types.
     ]
 ][
-    [[*small.json]]
+    [[link json.benchmarks.parse_small_json [*small.json]]]
     [603 bytes]
     [
         Containing a few nested objects with strings.
     ]
 ][
-    [[*strings.json]]
+    [[link json.benchmarks.parse_strings_json [*strings.json]]]
     [992KB]
     [
         Contains a single array with random long strings.
     ]
 ][
-    [[*twitter.json]]
+    [[link json.benchmarks.parse_twitter_json [*twitter.json]]]
     [631KB]
     [
         An export of data from Twitter's API.
@@ -152,6 +164,18 @@ and serializing unescaped strings:
 
 [heading Serialize strings.json]
 [$json/images/serialize-strings.png [width 668px] [height 712px]]
+
+[heading Parse integers-32.json]
+[$json/images/parse-integers-32.png [width 668px] [height 712px]]
+
+[heading Serialize integers-32.json]
+[$json/images/serialize-integers-32.png [width 668px] [height 712px]]
+
+[heading Parse integers-64.json]
+[$json/images/parse-integers-64.png [width 668px] [height 712px]]
+
+[heading Serialize integers-64.json]
+[$json/images/serialize-integers-64.png [width 668px] [height 712px]]
 
 [heading Parse small.json]
 [$json/images/parse-small.png [width 668px] [height 712px]]

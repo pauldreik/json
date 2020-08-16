@@ -4,7 +4,7 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/vinniefalco/json
+// Official repository: https://github.com/cppalliance/json
 //
 
 #ifndef BOOST_JSON_DETAIL_CONFIG_HPP
@@ -13,16 +13,11 @@
 #ifndef BOOST_JSON_STANDALONE
 # include <boost/config.hpp>
 # include <boost/assert.hpp>
-# include <boost/system/error_code.hpp>
-# include <boost/system/system_error.hpp>
-# include <boost/utility/string_view.hpp>
 # include <boost/throw_exception.hpp>
 #else
 # include <cassert>
-# include <string_view>
-# include <system_error>
 #endif
-#include <stdint.h>
+#include <cstdint>
 
 // detect 32/64 bit
 #if UINTPTR_MAX == UINT64_MAX
@@ -33,17 +28,49 @@
 # error Unknown or unsupported architecture, please open an issue
 #endif
 
-// VFALCO Copied from <boost/config.hpp>
+// VFALCO Copied from Boost.Config
 //        This is a derivative work.
-#ifdef __has_cpp_attribute
+#ifndef BOOST_JSON_NODISCARD
+# ifdef __has_cpp_attribute
 // clang-6 accepts [[nodiscard]] with -std=c++14, but warns about it -pedantic
-# if __has_cpp_attribute(nodiscard) && !(defined(__clang__) && (__cplusplus < 201703L))
-#  define BOOST_JSON_NODISCARD [[nodiscard]]
+#  if __has_cpp_attribute(nodiscard) && !(defined(__clang__) && (__cplusplus < 201703L))
+#   define BOOST_JSON_NODISCARD [[nodiscard]]
+#  else
+#   define BOOST_JSON_NODISCARD
+#  endif
 # else
 #  define BOOST_JSON_NODISCARD
 # endif
-#else
-# define BOOST_JSON_NODISCARD
+#endif
+
+#ifndef BOOST_JSON_REQUIRE_CONST_INIT
+# define BOOST_JSON_REQUIRE_CONST_INIT		
+# if defined(__clang__) && defined(__has_cpp_attribute)		
+#  if __has_cpp_attribute(clang::require_constant_initialization)		
+#   undef BOOST_JSON_REQUIRE_CONST_INIT		
+#   define BOOST_JSON_REQUIRE_CONST_INIT [[clang::require_constant_initialization]]		
+#  endif
+# endif
+#endif
+
+// BOOST_NORETURN ---------------------------------------------//
+// Macro to use before a function declaration/definition to designate
+// the function as not returning normally (i.e. with a return statement
+// or by leaving the function scope, if the function return type is void).
+#if !defined(BOOST_NORETURN)
+#  if defined(_MSC_VER)
+#    define BOOST_NORETURN __declspec(noreturn)
+#  elif defined(__GNUC__)
+#    define BOOST_NORETURN __attribute__ ((__noreturn__))
+#  elif defined(__has_attribute) && defined(__SUNPRO_CC) && (__SUNPRO_CC > 0x5130)
+#    if __has_attribute(noreturn)
+#      define BOOST_NORETURN [[noreturn]]
+#    endif
+#  elif defined(__has_cpp_attribute) 
+#    if __has_cpp_attribute(noreturn)
+#      define BOOST_NORETURN [[noreturn]]
+#    endif
+#  endif
 #endif
 
 #ifndef BOOST_ASSERT
@@ -55,7 +82,7 @@
 #endif
 
 #ifndef BOOST_FALLTHROUGH
-#define BOOST_FALLTHROUGH ((void)0)
+#define BOOST_FALLTHROUGH [[fallthrough]]
 #endif
 
 #ifndef BOOST_FORCEINLINE
@@ -74,15 +101,20 @@
 # endif
 #endif
 
-#ifndef BOOST_JSON_NO_SSE2
+#if ! defined(BOOST_JSON_NO_SSE2) && \
+    ! defined(BOOST_JSON_USE_SSE2)
 # if (defined(_M_IX86) && _M_IX86_FP == 2) || \
       defined(_M_X64) || defined(__SSE2__)
 #  define BOOST_JSON_USE_SSE2
 # endif
 #endif
 
+#ifndef BOOST_SYMBOL_VISIBLE
+#define BOOST_SYMBOL_VISIBLE
+#endif
+
 #ifndef BOOST_JSON_STANDALONE
-# if defined(GENERATING_DOCUMENTATION)
+# if defined(BOOST_JSON_DOCS)
 #  define BOOST_JSON_DECL
 # elif defined(BOOST_JSON_HEADER_ONLY)
 #  define BOOST_JSON_DECL inline
@@ -103,8 +135,8 @@
 #   if defined(BOOST_ALL_DYN_LINK) || defined(BOOST_JSON_DYN_LINK)
 #    define BOOST_DYN_LINK
 #   endif
-//#   include <boost/config/auto_link.hpp>
-#  endif  // auto-linking disabled
+#   include <boost/config/auto_link.hpp>
+#  endif
 # endif
 #else
 # ifdef BOOST_JSON_HEADER_ONLY
@@ -114,38 +146,47 @@
 # endif
 #endif
 
+#ifndef BOOST_JSON_LIKELY
+# if defined(__GNUC__) || defined(__clang__)
+#  define BOOST_JSON_LIKELY(x) __builtin_expect(!!(x), 1)
+# else
+#  define BOOST_JSON_LIKELY(x) x
+# endif
+#endif
+
+#ifndef BOOST_JSON_UNLIKELY
+# if defined(__GNUC__) || defined(__clang__)
+#  define BOOST_JSON_UNLIKELY(x) __builtin_expect(!!(x), 0)
+# else
+#  define BOOST_JSON_UNLIKELY(x) x
+# endif
+#endif
+
 // These macros are private, for tests, do not change
 // them or else previously built libraries won't match.
-#ifndef BOOST_JSON_MAX_OBJECT_SIZE
+#ifndef  BOOST_JSON_MAX_OBJECT_SIZE
 # define BOOST_JSON_NO_MAX_OBJECT_SIZE
 # define BOOST_JSON_MAX_OBJECT_SIZE  0x7ffffffe
 #endif
-#ifndef BOOST_JSON_MAX_ARRAY_SIZE
+#ifndef  BOOST_JSON_MAX_ARRAY_SIZE
 # define BOOST_JSON_NO_MAX_ARRAY_SIZE
 # define BOOST_JSON_MAX_ARRAY_SIZE   0x7ffffffe
 #endif
-#ifndef BOOST_JSON_MAX_STRING_SIZE
+#ifndef  BOOST_JSON_MAX_STRING_SIZE
 # define BOOST_JSON_NO_MAX_STRING_SIZE
 # define BOOST_JSON_MAX_STRING_SIZE  0x7ffffffe
 #endif
-#ifndef BOOST_JSON_MAX_STACK_SIZE
+#ifndef  BOOST_JSON_MAX_STACK_SIZE
 # define BOOST_JSON_NO_MAX_STACK_SIZE
 # define BOOST_JSON_MAX_STACK_SIZE  ((::size_t)(-1))
 #endif
-#ifndef BOOST_JSON_PARSER_BUFFER_SIZE
+#ifndef  BOOST_JSON_PARSER_BUFFER_SIZE
 # define BOOST_JSON_NO_PARSER_BUFFER_SIZE
 # define BOOST_JSON_PARSER_BUFFER_SIZE 2048
 #endif
 
 namespace boost {
 namespace json {
-
-#ifndef BOOST_JSON_STANDALONE
-using string_view = boost::string_view;
-#else
-using string_view = std::string_view;
-#endif
-
 namespace detail {
 
 template<class...>
@@ -171,6 +212,18 @@ struct remove_const<T const>
 };
 
 template<class T>
+struct remove_volatile
+{
+    using type = T;
+};
+
+template<class T>
+struct remove_volatile<T volatile>
+{
+    using type = T;
+};
+
+template<class T>
 struct remove_reference
 {
     using type = T;
@@ -181,6 +234,16 @@ struct remove_reference<T&>
 {
     using type = T;
 };
+
+template<class T>
+using remove_cv = typename
+    remove_const<typename
+    remove_reference<T>::type>::type;
+
+template<class T>
+using remove_cvref =
+    typename remove_reference<
+        remove_cv<T>>::type;
 
 template<class T>
 constexpr
@@ -200,14 +263,6 @@ exchange(T& t, U u) noexcept
     t = move(u);
     return v;
 }
-
-template<class T>
-using is_string_viewish = typename std::enable_if<
-    std::is_convertible<
-        T const&, string_view>::value &&
-    ! std::is_convertible<
-        T const&, char const*>::value
-            >::type;
 
 /*  This is a derivative work, original copyright:
 
@@ -229,25 +284,9 @@ template<typename T>
 constexpr T static_const<T>::value;
 
 #define BOOST_JSON_INLINE_VARIABLE(name, type) \
-    namespace \
-    { \
-        constexpr auto& name = \
-            ::boost::json::detail::static_const<type>::value; \
-    }
-
-struct primary_template
-{
-};
-
-template<class T>
-using is_specialized =
-    std::integral_constant<bool,
-        ! std::is_base_of<primary_template, T>::value>;
-
-template<class T>
-using remove_cr =
-    typename remove_const<
-    typename remove_reference<T>::type>::type;
+    namespace { constexpr auto& name = \
+        ::boost::json::detail::static_const<type>::value; \
+    } struct _unused_ ## name ## _semicolon_bait_
 
 } // detail
 } // json

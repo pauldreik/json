@@ -10,18 +10,22 @@
 // Test that header file is self-contained.
 #include <boost/json/object.hpp>
 
-#include <boost/beast/_experimental/unit_test/suite.hpp>
+#include <boost/json/monotonic_resource.hpp>
+#include <boost/json/number_cast.hpp>
+
 #include <cmath>
 #include <type_traits>
 
 #include "test.hpp"
+#include "test_suite.hpp"
 
 namespace boost {
 namespace json {
 
-class object_test : public beast::unit_test::suite
+class object_test
 {
 public:
+    test_suite::log_type log;
     string_view const str_;
 
     object_test()
@@ -106,13 +110,13 @@ public:
         object const& o,
         std::size_t capacity)
     {
-        BEAST_EXPECT(! o.empty());
-        BEAST_EXPECT(o.size() == 3);
-        BEAST_EXPECT(
+        BOOST_TEST(! o.empty());
+        BOOST_TEST(o.size() == 3);
+        BOOST_TEST(
             o.capacity() == capacity);
-        BEAST_EXPECT(o.at("a").as_int64() == 1);
-        BEAST_EXPECT(o.at("b").as_bool());
-        BEAST_EXPECT(o.at("c").as_string() == "hello");
+        BOOST_TEST(o.at("a").as_int64() == 1);
+        BOOST_TEST(o.at("b").as_bool());
+        BOOST_TEST(o.at("c").as_string() == "hello");
         check_storage(o, o.storage());
     }
 
@@ -127,9 +131,9 @@ public:
         // object()
         {
             object o;
-            BEAST_EXPECT(o.empty());
-            BEAST_EXPECT(o.size() == 0);
-            BEAST_EXPECT(o.capacity() == 0);
+            BOOST_TEST(o.empty());
+            BOOST_TEST(o.size() == 0);
+            BOOST_TEST(o.capacity() == 0);
         }
 
         // object(storage_ptr)
@@ -137,27 +141,27 @@ public:
         {
             object o(sp);
             check_storage(o, sp);
-            BEAST_EXPECT(o.empty());
-            BEAST_EXPECT(o.size() == 0);
-            BEAST_EXPECT(o.capacity() == 0);
+            BOOST_TEST(o.empty());
+            BOOST_TEST(o.size() == 0);
+            BOOST_TEST(o.capacity() == 0);
         });
 
         // object(std::size_t, storage_ptr)
         {
             {
                 object o(10);
-                BEAST_EXPECT(o.empty());
-                BEAST_EXPECT(o.size() == 0);
-                BEAST_EXPECT(o.capacity() >= 10);
+                BOOST_TEST(o.empty());
+                BOOST_TEST(o.size() == 0);
+                BOOST_TEST(o.capacity() >= 10);
             }
 
             fail_loop([&](storage_ptr const& sp)
             {
                 object o(10, sp);
                 check_storage(o, sp);
-                BEAST_EXPECT(o.empty());
-                BEAST_EXPECT(o.size() == 0);
-                BEAST_EXPECT(o.capacity() >= 10);
+                BOOST_TEST(o.empty());
+                BOOST_TEST(o.size() == 0);
+                BOOST_TEST(o.capacity() >= 10);
             });
         }
 
@@ -191,9 +195,9 @@ public:
                         {"b", true},
                         {"c", "hello"}};
                 object o(init.begin(), init.end(), 5, sp);
-                BEAST_EXPECT(! o.empty());
-                BEAST_EXPECT(o.size() == 3);
-                BEAST_EXPECT(o.capacity() == 7);
+                BOOST_TEST(! o.empty());
+                BOOST_TEST(o.size() == 3);
+                BOOST_TEST(o.capacity() == 7);
                 check(o, 7);
                 check_storage(o, sp);
             });
@@ -209,9 +213,9 @@ public:
                     make_input_iterator(init.begin()),
                     make_input_iterator(init.end()),
                     5, sp);
-                BEAST_EXPECT(! o.empty());
-                BEAST_EXPECT(o.size() == 3);
-                BEAST_EXPECT(o.capacity() == 7);
+                BOOST_TEST(! o.empty());
+                BOOST_TEST(o.size() == 3);
+                BOOST_TEST(o.capacity() == 7);
                 check(o, 7);
                 check_storage(o, sp);
             });
@@ -228,8 +232,8 @@ public:
             auto const sp =
                 storage_ptr{};
             object o2(std::move(o1));
-            BEAST_EXPECT(o1.empty());
-            BEAST_EXPECT(o1.size() == 0);
+            BOOST_TEST(o1.empty());
+            BOOST_TEST(o1.size() == 0);
             check(o2, 3);
             check_storage(o1, sp);
             check_storage(o2, sp);
@@ -244,7 +248,7 @@ public:
                 {"c", "hello"}
                 });
             object o2(std::move(o1), sp);
-            BEAST_EXPECT(! o1.empty());
+            BOOST_TEST(! o1.empty());
             check(o2, 3);
             check_storage(o1,
                 storage_ptr{});
@@ -254,22 +258,22 @@ public:
         // object(pilfered<object>)
         {
             auto const sp =
-                make_storage<unique_storage>();
+                make_counted_resource<unique_resource>();
             object o1({
                 {"a", 1},
                 {"b", true},
                 {"c", "hello"}
                 }, sp);
             object o2(pilfer(o1));
-            BEAST_EXPECT(
-                o1.storage() == nullptr);
-            BEAST_EXPECT(
+            BOOST_TEST(
+                o1.storage() == storage_ptr());
+            BOOST_TEST(
                 *o2.storage() == *sp);
-            BEAST_EXPECT(o1.empty());
+            BOOST_TEST(o1.empty());
             check(o2, 3);
         }
 
-        auto const sp = make_storage<unique_storage>();
+        auto const sp = make_counted_resource<unique_resource>();
         auto const sp0 = storage_ptr{};
 
         // object(object const&)
@@ -280,7 +284,7 @@ public:
                 {"c", "hello"}
                 });
             object o2(o1);
-            BEAST_EXPECT(! o1.empty());
+            BOOST_TEST(! o1.empty());
             check(o2, 3);
         }
 
@@ -293,7 +297,7 @@ public:
                 {"c", "hello"}
                 });
             object o2(o1, sp);
-            BEAST_EXPECT(! o1.empty());
+            BOOST_TEST(! o1.empty());
             check(o2, 3);
             check_storage(o2, sp);
         });
@@ -339,7 +343,7 @@ public:
                     {"c", "hello"}
                     },
                     5, sp);
-                BEAST_EXPECT(
+                BOOST_TEST(
                     *o.storage() == *sp);
                 check(o, 7);
             });
@@ -355,7 +359,7 @@ public:
                 object o2;
                 o2 = std::move(o1);
                 check(o2, 3);
-                BEAST_EXPECT(o1.empty());
+                BOOST_TEST(o1.empty());
                 check_storage(o1,
                     storage_ptr{});
                 check_storage(o2,
@@ -442,7 +446,7 @@ public:
                     {"a", 1},
                     {"b", true},
                     {"c", "hello"} },
-                BEAST_EXPECT(
+                BOOST_TEST(
                     *o.storage() == *sp);
                 check(o, 3);
                 check_storage(o, sp);
@@ -463,117 +467,117 @@ public:
 
         // empty container
         {
-            BEAST_EXPECT(no.begin() == no.end());
-            BEAST_EXPECT(cno.begin() == cno.end());
-            BEAST_EXPECT(no.cbegin() == no.cend());
+            BOOST_TEST(no.begin() == no.end());
+            BOOST_TEST(cno.begin() == cno.end());
+            BOOST_TEST(no.cbegin() == no.cend());
         }
 
         // begin()
         {
             auto it = o.begin();
-            BEAST_EXPECT(it->key() == "a"); ++it;
-            BEAST_EXPECT(it->key() == "b"); it++;
-            BEAST_EXPECT(it->key() == "c"); ++it;
-            BEAST_EXPECT(it == o.end());
+            BOOST_TEST(it->key() == "a"); ++it;
+            BOOST_TEST(it->key() == "b"); it++;
+            BOOST_TEST(it->key() == "c"); ++it;
+            BOOST_TEST(it == o.end());
         }
 
         // begin() const
         {
             auto it = co.begin();
-            BEAST_EXPECT(it->key() == "a"); ++it;
-            BEAST_EXPECT(it->key() == "b"); it++;
-            BEAST_EXPECT(it->key() == "c"); ++it;
-            BEAST_EXPECT(it == co.end());
+            BOOST_TEST(it->key() == "a"); ++it;
+            BOOST_TEST(it->key() == "b"); it++;
+            BOOST_TEST(it->key() == "c"); ++it;
+            BOOST_TEST(it == co.end());
         }
 
         // cbegin()
         {
             auto it = o.cbegin();
-            BEAST_EXPECT(it->key() == "a"); ++it;
-            BEAST_EXPECT(it->key() == "b"); it++;
-            BEAST_EXPECT(it->key() == "c"); ++it;
-            BEAST_EXPECT(it == o.cend());
+            BOOST_TEST(it->key() == "a"); ++it;
+            BOOST_TEST(it->key() == "b"); it++;
+            BOOST_TEST(it->key() == "c"); ++it;
+            BOOST_TEST(it == o.cend());
         }
 
         // end()
         {
             auto it = o.end();
-            --it; BEAST_EXPECT(it->key() == "c");
-            it--; BEAST_EXPECT(it->key() == "b");
-            --it; BEAST_EXPECT(it->key() == "a");
-            BEAST_EXPECT(it == o.begin());
+            --it; BOOST_TEST(it->key() == "c");
+            it--; BOOST_TEST(it->key() == "b");
+            --it; BOOST_TEST(it->key() == "a");
+            BOOST_TEST(it == o.begin());
         }
 
         // end() const
         {
             auto it = co.end();
-            --it; BEAST_EXPECT(it->key() == "c");
-            it--; BEAST_EXPECT(it->key() == "b");
-            --it; BEAST_EXPECT(it->key() == "a");
-            BEAST_EXPECT(it == co.begin());
+            --it; BOOST_TEST(it->key() == "c");
+            it--; BOOST_TEST(it->key() == "b");
+            --it; BOOST_TEST(it->key() == "a");
+            BOOST_TEST(it == co.begin());
         }
 
         // cend()
         {
             auto it = o.cend();
-            --it; BEAST_EXPECT(it->key() == "c");
-            it--; BEAST_EXPECT(it->key() == "b");
-            --it; BEAST_EXPECT(it->key() == "a");
-            BEAST_EXPECT(it == o.cbegin());
+            --it; BOOST_TEST(it->key() == "c");
+            it--; BOOST_TEST(it->key() == "b");
+            --it; BOOST_TEST(it->key() == "a");
+            BOOST_TEST(it == o.cbegin());
         }
 
         // rbegin()
         {
             auto it = o.rbegin();
-            BEAST_EXPECT(it->key() == "c"); ++it;
-            BEAST_EXPECT(it->key() == "b"); it++;
-            BEAST_EXPECT(it->key() == "a"); ++it;
-            BEAST_EXPECT(it == o.rend());
+            BOOST_TEST(it->key() == "c"); ++it;
+            BOOST_TEST(it->key() == "b"); it++;
+            BOOST_TEST(it->key() == "a"); ++it;
+            BOOST_TEST(it == o.rend());
         }
 
         // rbegin() const
         {
             auto it = co.rbegin();
-            BEAST_EXPECT(it->key() == "c"); ++it;
-            BEAST_EXPECT(it->key() == "b"); it++;
-            BEAST_EXPECT(it->key() == "a"); ++it;
-            BEAST_EXPECT(it == co.rend());
+            BOOST_TEST(it->key() == "c"); ++it;
+            BOOST_TEST(it->key() == "b"); it++;
+            BOOST_TEST(it->key() == "a"); ++it;
+            BOOST_TEST(it == co.rend());
         }
 
         // crbegin()
         {
             auto it = o.crbegin();
-            BEAST_EXPECT(it->key() == "c"); ++it;
-            BEAST_EXPECT(it->key() == "b"); it++;
-            BEAST_EXPECT(it->key() == "a"); ++it;
-            BEAST_EXPECT(it == o.crend());
+            BOOST_TEST(it->key() == "c"); ++it;
+            BOOST_TEST(it->key() == "b"); it++;
+            BOOST_TEST(it->key() == "a"); ++it;
+            BOOST_TEST(it == o.crend());
         }
 
         // rend()
         {
             auto it = o.rend();
-            --it; BEAST_EXPECT(it->key() == "a");
-            it--; BEAST_EXPECT(it->key() == "b");
-            --it; BEAST_EXPECT(it->key() == "c");
-            BEAST_EXPECT(it == o.rbegin());
+            --it; BOOST_TEST(it->key() == "a");
+            it--; BOOST_TEST(it->key() == "b");
+            --it; BOOST_TEST(it->key() == "c");
+            BOOST_TEST(it == o.rbegin());
         }
 
         // rend() const
         {
             auto it = co.rend();
-            --it; BEAST_EXPECT(it->key() == "a");
-            it--; BEAST_EXPECT(it->key() == "b");
-            --it; BEAST_EXPECT(it->key() == "c");
-            BEAST_EXPECT(it == co.rbegin());
+            --it; BOOST_TEST(it->key() == "a");
+            it--; BOOST_TEST(it->key() == "b");
+            --it; BOOST_TEST(it->key() == "c");
+            BOOST_TEST(it == co.rbegin());
         }
 
         // crend()
         {
             auto it = o.crend();
-            --it; BEAST_EXPECT(it->key() == "a");
-            it--; BEAST_EXPECT(it->key() == "b");
-            --it; BEAST_EXPECT(it->key() == "c");
-            BEAST_EXPECT(it == o.crbegin());
+            --it; BOOST_TEST(it->key() == "a");
+            it--; BOOST_TEST(it->key() == "b");
+            --it; BOOST_TEST(it->key() == "c");
+            BOOST_TEST(it == o.crbegin());
         }
     }
 
@@ -582,7 +586,7 @@ public:
     void
     testCapacity()
     {
-        BEAST_EXPECT(
+        BOOST_TEST(
             object{}.size() < object{}.max_size());
     }
 
@@ -596,15 +600,15 @@ public:
             {
                 object o;
                 o.clear();
-                BEAST_EXPECT(o.empty());
+                BOOST_TEST(o.empty());
             }
 
             {
                 object o;
                 o.emplace("x", 1);
-                BEAST_EXPECT(! o.empty());
+                BOOST_TEST(! o.empty());
                 o.clear();
-                BEAST_EXPECT(o.empty());
+                BOOST_TEST(o.empty());
             }
         }
 
@@ -615,9 +619,9 @@ public:
                 object o(sp);
                 auto result = o.insert(
                     std::make_pair("x", 1));
-                BEAST_EXPECT(result.second);
-                BEAST_EXPECT(result.first->key() == "x");
-                BEAST_EXPECT(result.first->value().as_int64() == 1);
+                BOOST_TEST(result.second);
+                BOOST_TEST(result.first->key() == "x");
+                BOOST_TEST(result.first->value().as_int64() == 1);
             });
 
             fail_loop([&](storage_ptr const& sp)
@@ -625,9 +629,9 @@ public:
                 object o(sp);
                 auto const p = std::make_pair("x", 1);
                 auto result = o.insert(p);
-                BEAST_EXPECT(result.second);
-                BEAST_EXPECT(result.first->key() == "x");
-                BEAST_EXPECT(result.first->value().as_int64() == 1);
+                BOOST_TEST(result.second);
+                BOOST_TEST(result.first->key() == "x");
+                BOOST_TEST(result.first->value().as_int64() == 1);
             });
 
             fail_loop([&](storage_ptr const& sp)
@@ -638,9 +642,9 @@ public:
                     {"c", 3}}, sp);
                 auto const result = o.insert(
                     std::make_pair("b", 4));
-                BEAST_EXPECT(
+                BOOST_TEST(
                     result.first->value().as_int64() == 2);
-                BEAST_EXPECT(! result.second);
+                BOOST_TEST(! result.second);
             });
         }
 
@@ -700,7 +704,7 @@ public:
             {
                 object o({{"a", 1}}, sp);
                 o.insert_or_assign("a", str_);
-                BEAST_EXPECT(o["a"].is_string());
+                BOOST_TEST(o["a"].is_string());
             });
 
             fail_loop([&](storage_ptr const& sp)
@@ -710,8 +714,8 @@ public:
                     {"b", 2},
                     {"c", 3}}, sp);
                 o.insert_or_assign("d", str_);
-                BEAST_EXPECT(o["d"].is_string());
-                BEAST_EXPECT(o.size() == 4);
+                BOOST_TEST(o["d"].is_string());
+                BOOST_TEST(o.size() == 4);
             });
 
             fail_loop([&](storage_ptr const& sp)
@@ -725,9 +729,9 @@ public:
             fail_loop([&](storage_ptr const& sp)
             {
                 object o({{"a", 1}}, sp);
-                BEAST_EXPECT(
+                BOOST_TEST(
                     ! o.insert_or_assign("a", 2).second);
-                BEAST_EXPECT(o["a"].as_int64() == 2);
+                BOOST_TEST(o["a"].as_int64() == 2);
             });
         }
 
@@ -751,8 +755,8 @@ public:
                     {"b", true},
                     {"c", "hello"}}, sp);
                 auto it = o.erase(o.begin());
-                BEAST_EXPECT(it->key() == "c");
-                BEAST_EXPECT(
+                BOOST_TEST(it->key() == "c");
+                BOOST_TEST(
                     it->value().as_string() == "hello");
                 check(o, 7);
             });
@@ -765,7 +769,7 @@ public:
                     {"a", 1},
                     {"b", true},
                     {"c", "hello"}});
-                BEAST_EXPECT(o.erase("b2") == 0);
+                BOOST_TEST(o.erase("b2") == 0);
                 check(o, 3);
             }
 
@@ -775,7 +779,7 @@ public:
                     {"b", true},
                     {"b2", 2},
                     {"c", "hello"}});
-                BEAST_EXPECT(o.erase("b2") == 1);
+                BOOST_TEST(o.erase("b2") == 1);
                 check(o, 7);
             }
         }
@@ -786,9 +790,9 @@ public:
                 object o1 = {{"a",1}, {"b",true}, {"c", "hello"}};
                 object o2 = {{"d",{1,2,3}}};
                 swap(o1, o2);
-                BEAST_EXPECT(o1.size() == 1);
-                BEAST_EXPECT(o2.size() == 3);
-                BEAST_EXPECT(o1.count("d") == 1);
+                BOOST_TEST(o1.size() == 1);
+                BOOST_TEST(o2.size() == 3);
+                BOOST_TEST(o1.count("d") == 1);
             }
 
             fail_loop([&](storage_ptr const& sp)
@@ -796,9 +800,9 @@ public:
                 object o1 = {{"a",1}, {"b",true}, {"c", "hello"}};
                 object o2({{"d",{1,2,3}}}, sp);
                 swap(o1, o2);
-                BEAST_EXPECT(o1.size() == 1);
-                BEAST_EXPECT(o2.size() == 3);
-                BEAST_EXPECT(o1.count("d") == 1);
+                BOOST_TEST(o1.size() == 1);
+                BOOST_TEST(o2.size() == 3);
+                BOOST_TEST(o1.count("d") == 1);
             });
 
             fail_loop([&](storage_ptr const& sp)
@@ -806,9 +810,9 @@ public:
                 object o1({{"d",{1,2,3}}}, sp);
                 object o2 = {{"a",1}, {"b",true}, {"c", "hello"}};
                 swap(o1, o2);
-                BEAST_EXPECT(o1.size() == 3);
-                BEAST_EXPECT(o2.size() == 1);
-                BEAST_EXPECT(o2.count("d") == 1);
+                BOOST_TEST(o1.size() == 3);
+                BOOST_TEST(o2.size() == 1);
+                BOOST_TEST(o2.count("d") == 1);
             });
         }
     }
@@ -826,18 +830,18 @@ public:
 
         // at(key)
         {
-            BEAST_EXPECT(
+            BOOST_TEST(
                 o1.at("a").is_number());
-            BEAST_THROWS((o1.at("d")),
-                std::out_of_range);
+            BOOST_TEST_THROWS((o1.at("d")),
+                key_not_found);
         }
 
         // at(key) const
         {
-            BEAST_EXPECT(
+            BOOST_TEST(
                 co1.at("a").is_number());
-            BEAST_THROWS((co1.at("d")),
-                std::out_of_range);
+            BOOST_TEST_THROWS((co1.at("d")),
+                key_not_found);
         }
 
         // operator[&](key)
@@ -846,31 +850,31 @@ public:
                 {"a", 1},
                 {"b", true},
                 {"c", "hello"}});
-            BEAST_EXPECT(o.count("d") == 0);;
-            BEAST_EXPECT(o["a"].is_number());
-            BEAST_EXPECT(o["d"].is_null());
-            BEAST_EXPECT(o.count("d") == 1);
+            BOOST_TEST(o.count("d") == 0);;
+            BOOST_TEST(o["a"].is_number());
+            BOOST_TEST(o["d"].is_null());
+            BOOST_TEST(o.count("d") == 1);
         }
 
         // count(key)
         {
-            BEAST_EXPECT(o1.count("a") == 1);
-            BEAST_EXPECT(o1.count("d") == 0);
-            BEAST_EXPECT(o1.count("e") == 0);
+            BOOST_TEST(o1.count("a") == 1);
+            BOOST_TEST(o1.count("d") == 0);
+            BOOST_TEST(o1.count("e") == 0);
         }
 
         // find(key)
         {
-            BEAST_EXPECT(
+            BOOST_TEST(
                 o1.find("a")->key() == "a");
-            BEAST_EXPECT(
+            BOOST_TEST(
                 o1.find("e") == o1.end());
         }
 
         // contains(key)
         {
-            BEAST_EXPECT(o1.contains("a"));
-            BEAST_EXPECT(! o1.contains("e"));
+            BOOST_TEST(o1.contains("a"));
+            BOOST_TEST(! o1.contains("e"));
         }
     }
 
@@ -884,17 +888,17 @@ public:
                 for(std::size_t i = 0; i < 10; ++i)
                     o.emplace(std::to_string(i), i);
                 o.reserve(15);
-                BEAST_EXPECT(o.capacity() >= 15);
+                BOOST_TEST(o.capacity() >= 15);
                 o.reserve(20);
-                BEAST_EXPECT(o.capacity() >= 20);
+                BOOST_TEST(o.capacity() >= 20);
             }
 
             {
                 object o;
                 o.reserve(3);
-                BEAST_EXPECT(o.capacity() == 3);
+                BOOST_TEST(o.capacity() == 3);
                 o.reserve(7);
-                BEAST_EXPECT(o.capacity() == 7);
+                BOOST_TEST(o.capacity() == 7);
             }
         }
     }
@@ -911,24 +915,146 @@ public:
                 {"b", true},
                 {"b", {1,2,3}},
                 {"c", "hello"}});
-            BEAST_EXPECT(o.at("a").as_int64() == 1);
-            BEAST_EXPECT(o.at("b").as_bool());
-            BEAST_EXPECT(o.at("c").as_string() == "hello");
+            BOOST_TEST(o.at("a").as_int64() == 1);
+            BOOST_TEST(o.at("b").as_bool());
+            BOOST_TEST(o.at("c").as_string() == "hello");
         }
 
         // find in missing or empty tables
         {
             object o;
-            BEAST_EXPECT(o.find("a") == o.end());
+            BOOST_TEST(o.find("a") == o.end());
             o.reserve(3);
-            BEAST_EXPECT(o.capacity() > 0);
-            BEAST_EXPECT(o.find("a") == o.end());
+            BOOST_TEST(o.capacity() > 0);
+            BOOST_TEST(o.find("a") == o.end());
         }
 
+        // destroy key_value_pair array with need_free=false
+        {
+            monotonic_resource mr;
+            object o({
+                {"a", 1},
+                {"b", true},
+                {"b", {1,2,3}},
+                {"c", "hello"}}, &mr);
+        }
+    }
+
+    static
+    string_view
+    make_key(
+        std::size_t i,
+        char* buf)
+    {
+        int constexpr base = 62;
+        char const* const alphabet =
+            "0123456789"
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            "abcdefghijklmnopqrstuvwxyz";
+        char* dest = buf;
+        do
+        {
+            *dest++ = alphabet[i%base];
+            i /= base;
+        }
+        while(i);
+        return { buf, static_cast<
+            std::size_t>(dest-buf) };
     }
 
     void
-    run() override
+    testCollisions()
+    {
+        int constexpr buckets = 3;
+#if 0
+        {
+            // VFALCO This code finds the collisions
+            object o(this); // must create 3 buckets
+            char buf[26];
+            auto const match =
+                o.impl_.digest("0") % buckets;
+            std::size_t i = 8;
+            for(;;)
+            {
+                if((o.impl_.digest(
+                    make_key(i, buf)) % buckets) == match)
+                {
+                    log <<
+                        "match: \"" <<
+                        make_key(i, buf) <<
+                        "\"\n";
+                    break;
+                }
+                ++i;
+            }
+            }
+#endif
+        // Create an object with 3 keys that
+        // hash to the same bucket.
+
+    #if BOOST_JSON_ARCH == 32
+        string_view k1 = "0";
+        string_view k2 = "7";
+        string_view k3 = "A";
+    #else
+        string_view k1 = "0";
+        string_view k2 = "7";
+        string_view k3 = "C";
+    #endif
+
+        // ensure collisions are distinguishable
+        {
+            object o(this);
+            BOOST_TEST(
+                (o.impl_.digest(k1) % buckets) ==
+                (o.impl_.digest(k2) % buckets));
+            BOOST_TEST(
+                (o.impl_.digest(k2) % buckets) ==
+                (o.impl_.digest(k3) % buckets));
+            o.emplace(k1, 1);
+            o.emplace(k2, 2);
+            o.emplace(k3, 3);
+            BOOST_TEST(number_cast<int>(o.at(k1)) == 1);
+            BOOST_TEST(number_cast<int>(o.at(k2)) == 2);
+            BOOST_TEST(number_cast<int>(o.at(k3)) == 3);
+        }
+
+        // erase k1
+        {
+            object o(this);
+            o.emplace(k1, 1);
+            o.emplace(k2, 2);
+            o.emplace(k3, 3);
+            o.erase(k1);
+            BOOST_TEST(number_cast<int>(o.at(k2)) == 2);
+            BOOST_TEST(number_cast<int>(o.at(k3)) == 3);
+        }
+
+        // erase k2
+        {
+            object o(this);
+            o.emplace(k1, 1);
+            o.emplace(k2, 2);
+            o.emplace(k3, 3);
+            o.erase(k2);
+            BOOST_TEST(number_cast<int>(o.at(k1)) == 1);
+            BOOST_TEST(number_cast<int>(o.at(k3)) == 3);
+        }
+
+        // erase k3
+        {
+            object o(this);
+            o.emplace(k1, 1);
+            o.emplace(k2, 2);
+            o.emplace(k3, 3);
+            o.erase(k3);
+            BOOST_TEST(number_cast<int>(o.at(k1)) == 1);
+            BOOST_TEST(number_cast<int>(o.at(k2)) == 2);
+        }
+    }
+
+    void
+    run()
     {
         testSpecial();
         testIterators();
@@ -937,10 +1063,11 @@ public:
         testLookup();
         testHashPolicy();
         testImplementation();
+        testCollisions();
     }
 };
 
-BEAST_DEFINE_TESTSUITE(boost,json,object);
+TEST_SUITE(object_test, "boost.json.object");
 
 } // json
 } // boost

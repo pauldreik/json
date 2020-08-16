@@ -1,10 +1,10 @@
 <img width="880" height = "80" alt = "Boost.JSON Title"
-    src="https://raw.githubusercontent.com/vinniefalco/json/master/doc/images/repo-logo.png">
+    src="https://raw.githubusercontent.com/CPPAlliance/json/master/doc/images/repo-logo-2.png">
 
 Branch          | Travis | Appveyor | Azure Pipelines | codecov.io | Docs | Matrix |
 :-------------: | ------ | -------- | --------------- | ---------- | ---- | ------ |
-[`master`](https://github.com/vinniefalco/json/tree/master) | [![Build Status](https://travis-ci.org/vinniefalco/json.svg?branch=master)](https://travis-ci.org/vinniefalco/json) | [![Build status](https://ci.appveyor.com/api/projects/status/github/vinniefalco/json?branch=master&svg=true)](https://ci.appveyor.com/project/vinniefalco/json/branch/master) | [![Build Status](https://img.shields.io/azure-devops/build/vinniefalco/2571d415-8cc8-4120-a762-c03a8eda0659/1/master)](https://vinniefalco.visualstudio.com/json/_build/latest?definitionId=1&branchName=master) | [![codecov](https://codecov.io/gh/vinniefalco/json/branch/master/graph/badge.svg)](https://codecov.io/gh/vinniefalco/json/branch/master) | [![Documentation](https://img.shields.io/badge/docs-master-brightgreen.svg)](http://vinniefalco.github.com/doc/json/index.html) | [![Matrix](https://img.shields.io/badge/matrix-master-brightgreen.svg)](http://www.boost.org/development/tests/master/developer/json.html)
-[`develop`](https://github.com/vinniefalco/json/tree/develop) | [![Build Status](https://travis-ci.org/vinniefalco/json.svg?branch=develop)](https://travis-ci.org/vinniefalco/json) | [![Build status](https://ci.appveyor.com/api/projects/status/github/vinniefalco/json?branch=develop&svg=true)](https://ci.appveyor.com/project/vinniefalco/json/branch/develop) | [![Build Status](https://img.shields.io/azure-devops/build/vinniefalco/2571d415-8cc8-4120-a762-c03a8eda0659/1/develop)](https://vinniefalco.visualstudio.com/json/_build/latest?definitionId=1&branchName=develop) | [![codecov](https://codecov.io/gh/vinniefalco/json/branch/develop/graph/badge.svg)](https://codecov.io/gh/vinniefalco/json/branch/develop) | [![Documentation](https://img.shields.io/badge/docs-develop-brightgreen.svg)](http://vinniefalco.github.com/doc/json/index.html) | [![Matrix](https://img.shields.io/badge/matrix-develop-brightgreen.svg)](http://www.boost.org/development/tests/develop/developer/json.html)
+[`master`](https://github.com/CPPAlliance/json/tree/master) | [![Build Status](https://travis-ci.org/CPPAlliance/json.svg?branch=master)](https://travis-ci.org/CPPAlliance/json) | [![Build status](https://ci.appveyor.com/api/projects/status/8csswcnmfm798203?branch=master&svg=true)](https://ci.appveyor.com/project/vinniefalco/cppalliance-json/branch/master) | [![Build Status](https://img.shields.io/azure-devops/build/vinniefalco/2571d415-8cc8-4120-a762-c03a8eda0659/5/master)](https://vinniefalco.visualstudio.com/json/_build/latest?definitionId=5&branchName=master) | [![codecov](https://codecov.io/gh/CPPAlliance/json/branch/master/graph/badge.svg)](https://codecov.io/gh/CPPAlliance/json/branch/master) | [![Documentation](https://img.shields.io/badge/docs-master-brightgreen.svg)](http://vinniefalco.github.com/doc/json/index.html) | [![Matrix](https://img.shields.io/badge/matrix-master-brightgreen.svg)](http://www.boost.org/development/tests/master/developer/json.html)
+[`develop`](https://github.com/CPPAlliance/json/tree/develop) | [![Build Status](https://travis-ci.org/CPPAlliance/json.svg?branch=develop)](https://travis-ci.org/CPPAlliance/json) | [![Build status](https://ci.appveyor.com/api/projects/status/8csswcnmfm798203?branch=develop&svg=true)](https://ci.appveyor.com/project/vinniefalco/cppalliance-json/branch/develop) | [![Build Status](https://img.shields.io/azure-devops/build/vinniefalco/2571d415-8cc8-4120-a762-c03a8eda0659/5/develop)](https://vinniefalco.visualstudio.com/json/_build/latest?definitionId=5&branchName=develop) | [![codecov](https://codecov.io/gh/CPPAlliance/json/branch/develop/graph/badge.svg)](https://codecov.io/gh/CPPAlliance/json/branch/develop) | [![Documentation](https://img.shields.io/badge/docs-develop-brightgreen.svg)](http://vinniefalco.github.com/doc/json/index.html) | [![Matrix](https://img.shields.io/badge/matrix-develop-brightgreen.svg)](http://www.boost.org/development/tests/develop/developer/json.html)
 
 # Boost.JSON
 
@@ -40,12 +40,19 @@ return types in public interfaces.
 
 The design of the library also achieves these goals:
 
-* Requires only C++11
-* Support stateful allocators
-* Uniform interface on all C++ versions
-* Strict parser and serializer which work incrementally
-* Security-aware treatment of untrusted inputs
-* Fast compilation performance
+* Requires only C++11.
+* Support stateful allocators.
+* Top performance of general libraries.
+* Uniform interface on all C++ versions.
+* Key lookup in objects has constant average complexity.
+* Strict parser and serializer which work incrementally.
+* Security-aware treatment of untrusted inputs.
+* Fast compilation performance.
+
+## CMake
+
+    cmake -G "Visual Studio 16 2019" -A Win32 -B bin -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/msvc.cmake
+    cmake -G "Visual Studio 16 2019" -A x64 -B bin64 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/msvc.cmake
 
 ## License
 

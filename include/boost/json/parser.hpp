@@ -4,18 +4,17 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/vinniefalco/json
+// Official repository: https://github.com/cppalliance/json
 //
 
 #ifndef BOOST_JSON_PARSER_HPP
 #define BOOST_JSON_PARSER_HPP
 
-#include <boost/json/config.hpp>
-#include <boost/json/basic_parser.hpp>
-#include <boost/json/storage.hpp>
+#include <boost/json/detail/config.hpp>
+#include <boost/json/storage_ptr.hpp>
 #include <boost/json/value.hpp>
 #include <boost/json/string.hpp>
-#include <boost/json/detail/except.hpp>
+#include <boost/json/detail/basic_parser.hpp>
 #include <boost/json/detail/raw_stack.hpp>
 #include <new>
 #include <string>
@@ -43,7 +42,7 @@ namespace json {
     @ref write, and @ref finish may be called to
     provide successive buffers of characters of the
     JSON. The caller can check that the parse is
-    complete by calling @ref is_done, or that a
+    complete by calling @ref is_complete, or that a
     non-successful error code is returned.
 
     @par Incremental Parsing
@@ -57,24 +56,25 @@ namespace json {
     to bound the amount of work performed in each
     parsing cycle.
 
-    <br>
+    @par Intermediate Storage
 
     The parser may dynamically allocate intermediate
     storage as needed to accommodate the nesting level
-    of the JSON being parsed. This storage is freed
-    when the parser is destroyed, allowing the parser
-    to cheaply re-use this memory when parsing
-    subsequent JSONs, improving performance.
+    of the JSON being parsed. Intermediate storage is
+    allocated using the @ref storage_ptr passed to
+    the constructor; if no such argument is specified,
+    the default memory resource will be used instead.
+    This storage is freed when the parser is destroyed, 
+    allowing the parser to cheaply reuse this memory
+    when parsing subsequent JSONs, improving performance.
 */
-class parser final
-    : public basic_parser
+class parser : public basic_parser
 {
+    friend class basic_parser;
     enum class state : char;
-
     struct level
     {
         std::uint32_t count;
-        saved_state ss;
         char align;
         state st;
     };
@@ -101,11 +101,80 @@ public:
 
     /** Default constructor.
 
+        Constructs an empty parser that uses the
+        default memory resource to allocate
+        intermediate storage.
+
+        @note
         Before any JSON can be parsed, the function
-        @ref start must be called.
+        @ref start must be called. 
     */
     BOOST_JSON_DECL
-    parser();
+    parser() noexcept;
+
+    /** Constructor.
+
+        Constructs a empty parser using the supplied
+        @ref storage_ptr to allocate
+        intermediate storage.
+
+        @note
+        Before any JSON can be parsed, the function
+        @ref start must be called.
+
+        <br>
+
+        The `sp` parameter is only used to
+        allocate intermediate storage; it will not be used
+        for the @ref value returned by @ref release.
+
+        @param sp The @ref storage_ptr to use for
+        intermediate storage allocations.
+    */
+    BOOST_JSON_DECL
+    explicit 
+    parser(storage_ptr sp) noexcept;
+
+
+    /** Constructor.
+        
+        Constructs a parser using the specified options.
+
+        @note
+        Before any JSON can be parsed, the function
+        @ref start must be called.
+
+        @param opt The options for the parser.
+    */
+    BOOST_JSON_DECL
+    explicit
+    parser(const parse_options& opt) noexcept;
+    
+    /** Constructor.
+        
+        Constructs a parser using the specified
+        options for the parser and the supplied
+        @ref storage_ptr to allocate intermediate storage.
+
+        @note
+        Before any JSON can be parsed, the function
+        @ref start must be called.
+
+        <br>
+
+        The `sp` parameter is only used to
+        allocate intermediate storage; it will not be used
+        for the @ref value returned by @ref release.
+
+        @param sp The @ref storage_ptr to use for
+        intermediate storage allocations.
+
+        @param opt The options for the parser.
+    */
+    BOOST_JSON_DECL
+    parser(
+        storage_ptr sp, 
+        const parse_options& opt) noexcept;
 
     /** Reserve internal storage space.
 
@@ -133,13 +202,148 @@ public:
         parsing a new JSON incrementally; that is, when
         using @ref write_some, @ref write, or @ref finish.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The parser will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     BOOST_JSON_DECL
     void
     start(storage_ptr sp = {}) noexcept;
+
+    /** Parse JSON incrementally.
+
+        This function parses the JSON in the specified
+        buffer. The parse proceeds from the current
+        state, which is at the beginning of a new JSON
+        or in the middle of the current JSON if any
+        characters were already parsed.
+
+        <br>
+
+        The characters in the buffer are processed
+        starting from the beginning, until one of the
+        following conditions is met:
+
+        @li All of the characters in the buffer have been
+        parsed, or
+
+        @li A complete JSON is parsed, including any
+        optional trailing whitespace in the buffer, or
+
+        @li A parsing error occurs.
+
+        The supplied buffer does not need to contain the
+        entire JSON. Subsequent calls can provide more
+        serialized data, allowing JSON to be processed
+        incrementally. The end of the serialized JSON
+        can be indicated by calling @ref finish().
+
+        @par Complexity
+
+        Linear in `size`.
+
+        @param data A pointer to a buffer of `size`
+        characters to parse.
+
+        @param size The number of characters pointed to
+        by `data`.
+
+        @param ec Set to the error, if any occurred.
+
+        @return The number of characters consumed from
+        the buffer, which may be less than the size
+        provided.
+    */
+    BOOST_JSON_DECL
+    std::size_t
+    write(
+        char const* data,
+        std::size_t size,
+        error_code& ec);
+
+    /** Parse JSON incrementally.
+
+        This function parses the JSON in the specified
+        buffer. The parse proceeds from the current
+        state, which is at the beginning of a new JSON
+        or in the middle of the current JSON if any
+        characters were already parsed.
+
+        <br>
+
+        The characters in the buffer are processed
+        starting from the beginning, until one of the
+        following conditions is met:
+
+        @li All of the characters in the buffer have been
+        parsed, or
+
+        @li A complete JSON is parsed, including any
+        optional trailing whitespace in the buffer, or
+
+        @li A parsing error occurs.
+
+        The supplied buffer does not need to contain the
+        entire JSON. Subsequent calls can provide more
+        serialized data, allowing JSON to be processed
+        incrementally. The end of the serialized JSON
+        can be indicated by calling @ref finish().
+
+        @par Complexity
+
+        Linear in `size`.
+
+        @param data A pointer to a buffer of `size`
+        characters to parse.
+
+        @param size The number of characters pointed to
+        by `data`.
+
+        @return The number of characters consumed from
+        the buffer, which may be less than the size
+        provided.
+
+        @throw system_error Thrown on failure.
+    */
+    BOOST_JSON_DECL
+    std::size_t
+    write(
+        char const* data,
+        std::size_t size);
+
+    /** Parse JSON incrementally.
+
+        The caller uses this function to inform the
+        parser that there is no more serialized JSON
+        available. If a complete JSON is not available
+        the error is set to indicate failure.
+
+        @par Complexity
+
+        Constant.
+
+        @param ec Set to the error, if any occurred.
+    */
+    BOOST_JSON_DECL
+    void
+    finish(error_code& ec);
+
+    /** Parse JSON incrementally.
+
+        The caller uses this function to inform the
+        parser that there is no more serialized JSON
+        available. If a complete JSON is not available
+        the error is set to indicate failure.
+
+        @par Complexity
+
+        Constant.
+
+        @throw system_error Thrown on failure.
+    */
+    BOOST_JSON_DECL
+    void
+    finish();
 
     /** Discard all parsed JSON results.
 
@@ -159,16 +363,15 @@ public:
 
     /** Return the parsed JSON as a @ref value.
 
-        If @ref is_done() returns `true`, then the
+        If @ref is_complete() returns `true`, then the
         parsed value is returned. Otherwise an
         exception is thrown.
 
-        @throw std::logic_error `! is_done()`
+        @throw std::logic_error `! is_complete()`
 
         @return The parsed value. Ownership of this
         value is transferred to the caller.       
     */
-    BOOST_JSON_NODISCARD
     BOOST_JSON_DECL
     value
     release();
@@ -184,7 +387,19 @@ private:
 
     template<class... Args>
     void
-    emplace(Args&&... args);
+    emplace_object(
+        Args&&... args);
+
+    template<class... Args>
+    void
+    emplace_array(
+        Args&&... args);
+
+    template<class... Args>
+    bool
+    emplace(
+        error_code& ec,
+        Args&&... args);
 
     template<class T>
     void
@@ -203,87 +418,115 @@ private:
     pop_chars(
         std::size_t size) noexcept;
 
-    BOOST_JSON_DECL
-    void
+    inline
+    bool
     on_document_begin(
-        error_code& ec) override;
+        error_code& ec);
 
-    BOOST_JSON_DECL
-    void
+    inline
+    bool
     on_document_end(
-        error_code& ec) override;
+        error_code& ec);
 
-    BOOST_JSON_DECL
-    void
+    inline
+    bool
     on_object_begin(
-        error_code& ec) override;
+        error_code& ec);
 
-    BOOST_JSON_DECL
-    void
+    inline
+    bool
     on_object_end(
-        error_code& ec) override;
+        error_code& ec);
 
-    BOOST_JSON_DECL
-    void
+    inline
+    bool
     on_array_begin(
-        error_code& ec) override;
+        error_code& ec);
 
-    BOOST_JSON_DECL
-    void
+    inline
+    bool
     on_array_end(
-        error_code& ec) override;
+        error_code& ec);
 
-    BOOST_JSON_DECL
-    void
+    inline
+    bool
     on_key_part(
         string_view s,
-        error_code& ec) override;
+        error_code& ec);
 
-    BOOST_JSON_DECL
-    void
+    inline
+    bool
     on_key(
         string_view s,
-        error_code& ec) override;
+        error_code& ec);
 
-    BOOST_JSON_DECL
-    void
+    inline
+    bool
     on_string_part(
         string_view s,
-        error_code& ec) override;
+        error_code& ec);
 
-    BOOST_JSON_DECL
-    void
+    inline
+    bool
     on_string(
         string_view s,
-        error_code& ec) override;
+        error_code& ec);
 
-    BOOST_JSON_DECL
-    void
+    inline
+    bool
+    on_number_part(
+        string_view,
+        error_code&)
+    {
+        return true;
+    }
+
+    inline
+    bool
     on_int64(
         int64_t i,
-        error_code& ec) override;
+        string_view,
+        error_code& ec);
 
-    BOOST_JSON_DECL
-    void
+    inline
+    bool
     on_uint64(
         uint64_t u,
-        error_code& ec) override;
+        string_view,
+        error_code& ec);
 
-    BOOST_JSON_DECL
-    void
+    inline
+    bool
     on_double(
         double d,
-        error_code& ec) override;
+        string_view,
+        error_code& ec);
 
-    BOOST_JSON_DECL
-    void
+    inline
+    bool
     on_bool(
         bool b,
-        error_code& ec) override;
+        error_code& ec);
 
-    BOOST_JSON_DECL
-    void
-    on_null(error_code&) override;
+    inline
+    bool
+    on_null(error_code&);
+
+    bool
+    on_comment_part(
+        string_view,
+        error_code&) 
+    { 
+        return true; 
+    }
+    
+    bool
+    on_comment(
+        string_view, 
+        error_code&) 
+    { 
+        return true; 
+    }
 };
 
 //----------------------------------------------------------
@@ -295,7 +538,7 @@ private:
     as a @ref value. If the buffer does not contain a
     complete serialized JSON, an error occurs. In this
     case the returned value will be null, using the
-    default storage.
+    default memory resource.
 
     @par Complexity
 
@@ -304,15 +547,15 @@ private:
     @par Exception Safety
 
     Strong guarantee.
-    Calls to @ref storage::allocate may throw.
+    Calls to `memory_resource::allocate` may throw.
 
     @param s The string to parse.
 
     @param ec Set to the error, if any occurred.
 
-    @param sp The storage that the new value and all of
+    @param sp The memory resource that the new value and all of
     its elements will use. If this parameter is omitted,
-    the default storage is used.
+    the default memory resource is used.
 
     @return A value representing the parsed JSON,
     or a null if any error occurred.
@@ -331,7 +574,7 @@ parse(
     as a @ref value. If the buffer does not contain a
     complete serialized JSON, an error occurs. In this
     case the returned value will be null, using the
-    default storage.
+    default memory resource.
 
     @par Complexity
 
@@ -340,13 +583,13 @@ parse(
     @par Exception Safety
 
     Strong guarantee.
-    Calls to @ref storage::allocate may throw.
+    Calls to `memory_resource::allocate` may throw.
 
     @param s The string to parse.
 
-    @param sp The storage that the new value and all of
+    @param sp The memory resource that the new value and all of
     its elements will use. If this parameter is omitted,
-    the default storage is used.
+    the default memory resource is used.
 
     @throw system_error Thrown on failure.
 

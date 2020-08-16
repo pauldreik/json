@@ -4,14 +4,13 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/vinniefalco/json
+// Official repository: https://github.com/cppalliance/json
 //
 
 #ifndef BOOST_JSON_IMPL_ARRAY_HPP
 #define BOOST_JSON_IMPL_ARRAY_HPP
 
 #include <boost/json/value.hpp>
-#include <boost/json/detail/except.hpp>
 #include <algorithm>
 #include <stdexcept>
 #include <type_traits>
@@ -81,9 +80,7 @@ at(std::size_t pos) ->
     reference
 {
     if(pos >= impl_.size())
-        BOOST_THROW_EXCEPTION(
-            std::out_of_range(
-                "bad array index"));
+        array_index_error::raise();
     return impl_.data()[pos];
 }
 
@@ -93,9 +90,7 @@ at(std::size_t pos) const ->
     const_reference
 {
     if(pos >= impl_.size())
-        BOOST_THROW_EXCEPTION(
-            std::out_of_range(
-                "bad array index"));
+        array_index_error::raise();
     return impl_.data()[pos];
 }
 
@@ -376,8 +371,7 @@ array(
         static_cast<std::size_t>(
             std::distance(first, last));
     if(n > max_size())
-        BOOST_THROW_EXCEPTION(
-            detail::array_too_large_exception());
+        array_too_large::raise();
     reserve(static_cast<std::size_t>(n));
     while(impl_.size() < n)
     {
@@ -426,8 +420,7 @@ insert(
         static_cast<std::size_t>(
             std::distance(first, last));
     if(n > max_size())
-        BOOST_THROW_EXCEPTION(
-            detail::array_too_large_exception());
+        array_too_large::raise();
     undo_insert u(pos, static_cast<
         std::size_t>(n), *this);
     while(first != last)

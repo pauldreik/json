@@ -4,14 +4,13 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/vinniefalco/json
+// Official repository: https://github.com/cppalliance/json
 //
 
 #ifndef BOOST_JSON_IMPL_ARRAY_IPP
 #define BOOST_JSON_IMPL_ARRAY_IPP
 
 #include <boost/json/array.hpp>
-#include <boost/json/detail/except.hpp>
 #include <boost/pilfer.hpp>
 #include <cstdlib>
 #include <limits>
@@ -38,12 +37,11 @@ undo_insert(
     std::size_t n,
     array& self)
     : self_(self)
-    , n_(static_cast<std::size_t>(n))
+    , n_(n)
     , pos(self.impl_.index_of(pos_))
 {
     if(n > max_size())
-        BOOST_THROW_EXCEPTION(
-            detail::array_too_large_exception());
+        array_too_large::raise();
     self_.reserve(
         self_.impl_.size() + n_);
     // (iterators invalidated now)
@@ -154,7 +152,7 @@ array(
 array::
 array(pilfered<array> other) noexcept
     : sp_(detail::exchange(
-        other.get().sp_, nullptr))
+        other.get().sp_, storage_ptr()))
     , impl_(std::move(other.get().impl_))
 {
 }
@@ -186,12 +184,15 @@ array(
 
 array::
 array(
-    std::initializer_list<value> init,
+    std::initializer_list<value_ref> init,
     storage_ptr sp)
     : sp_(std::move(sp))
 {
     undo_construct u(*this);
-    copy(init);
+    reserve(init.size());
+    value_ref::write_array(
+        data(), init, sp_);
+    impl_.size(init.size());
     u.commit = true;
 }
 
@@ -222,7 +223,7 @@ operator=(array&& other)
 array&
 array::
 operator=(
-    std::initializer_list<value> init)
+    std::initializer_list<value_ref> init)
 {
     array tmp(init, sp_);
     this->~array();
@@ -312,14 +313,14 @@ auto
 array::
 insert(
     const_iterator pos,
-    std::initializer_list<value> init) ->
-        iterator
+    std::initializer_list<
+        value_ref> init) ->
+    iterator
 {
-    undo_insert u(pos,
-        static_cast<std::size_t>(
-            init.size()), *this);
-    for(auto const& v : init)
-        u.emplace(v);
+    undo_insert u(
+        pos, init.size(), *this);
+    value_ref::write_array(
+        impl_.data() + u.pos, init, sp_);
     u.commit = true;
     return impl_.data() + u.pos;
 }
@@ -463,9 +464,10 @@ array::
 destroy(
     value* first, value* last) noexcept
 {
-    if(sp_->need_free())
-        while(last != first)
-            (*--last).~value();
+    if(sp_.is_not_counted_and_deallocate_is_null())
+        return;
+    while(last != first)
+        (*--last).~value();
 }
 
 void
@@ -481,26 +483,6 @@ copy(array const& other)
 {
     reserve(other.size());
     for(auto const& v : other)
-    {
-        ::new(
-            impl_.data() +
-            impl_.size()) value(v, sp_);
-        impl_.size(impl_.size() + 1);
-    }
-}
-
-void
-array::
-copy(
-    std::initializer_list<value> init)
-{
-    if(init.size() > max_size())
-        BOOST_THROW_EXCEPTION(
-            std::length_error(
-                "size > max_size()"));
-    reserve(static_cast<
-        std::size_t>(init.size()));
-    for(auto const& v : init)
     {
         ::new(
             impl_.data() +

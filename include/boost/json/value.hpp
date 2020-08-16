@@ -1,23 +1,25 @@
 //
 // Copyright (c) 2019 Vinnie Falco (vinnie.falco@gmail.com)
+// Copyright (c) 2020 Krystian Stasiowski (sdkrystian@gmail.com)
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/vinniefalco/json
+// Official repository: https://github.com/cppalliance/json
 //
 
 #ifndef BOOST_JSON_VALUE_HPP
 #define BOOST_JSON_VALUE_HPP
 
-#include <boost/json/config.hpp>
+#include <boost/json/detail/config.hpp>
 #include <boost/json/array.hpp>
-#include <boost/json/error.hpp>
+#include <boost/json/except.hpp>
 #include <boost/json/kind.hpp>
 #include <boost/json/object.hpp>
 #include <boost/json/storage_ptr.hpp>
 #include <boost/json/string.hpp>
-#include <boost/json/detail/value.hpp>
+#include <boost/json/string_view.hpp>
+#include <boost/json/value_ref.hpp>
 #include <boost/json/detail/scalar_impl.hpp>
 #include <boost/pilfer.hpp>
 #include <cstdlib>
@@ -30,63 +32,6 @@
 namespace boost {
 namespace json {
 
-/** Customization point for assigning to and from class types.
-*/
-template<class T>
-struct value_exchange final
-#ifndef GENERATING_DOCUMENTATION
-    : detail::primary_template
-#endif
-{
-    static
-    void
-    to_json(T const& t, value& v)
-    {
-        detail::call_to_json(t, v);
-    }
-
-    static
-    void
-    from_json(T& t, value const& v)
-    {
-        detail::call_from_json(t, v);
-    }
-};
-
-/** Returns `std::true_type` if a JSON value can be assigend to an instance of `T`.
-*/
-template<class T>
-using has_from_json =
-#ifdef GENERATING_DOCUMENTATION
-    __see_below__;
-#else
-    std::integral_constant<bool,
-        detail::is_specialized<value_exchange<
-            detail::remove_cr<T>>>::value ||
-        detail::has_adl_from_json<
-            detail::remove_cr<T>>::value ||
-        detail::has_mf_from_json<
-            detail::remove_cr<T>>::value>;
-#endif
-
-/** Returns `std::true_type` if a JSON value can be constructed from `T`
-*/
-template<class T>
-using has_to_json =
-#ifdef GENERATING_DOCUMENTATION
-    __see_below__;
-#else
-    std::integral_constant<bool,
-        detail::is_specialized<value_exchange<
-            detail::remove_cr<T>>>::value ||
-        detail::has_adl_to_json<
-            detail::remove_cr<T>>::value ||
-        detail::has_mf_to_json<
-            detail::remove_cr<T>>::value>;
-#endif
-
-//----------------------------------------------------------
-
 /** The type used to represent any JSON value
 
     @par Thread Safety:
@@ -98,7 +43,7 @@ using has_to_json =
 */
 class value
 {
-#ifndef GENERATING_DOCUMENTATION
+#ifndef BOOST_JSON_DOCS
     // XSL scripts have trouble with private anon unions
     using int64_k = detail::int64_k;
     using uint64_k = detail::uint64_k;
@@ -135,8 +80,8 @@ public:
     /** Destructor.
 
         The value and all of its contents are destroyed.
-        Any dynamically allocated internal storage
-        is freed.
+        Any dynamically allocated memory that was allocated
+        internally is freed.
 
         @par Complexity
 
@@ -145,7 +90,7 @@ public:
     BOOST_JSON_DECL
     ~value();
 
-#ifndef GENERATING_DOCUMENTATION
+#ifndef BOOST_JSON_DOCS
     // private
     inline value(detail::unchecked_object&& uo);
     inline value(detail::unchecked_array&& ua);
@@ -154,7 +99,7 @@ public:
     /** Default constructor.
 
         The constructed value is null,
-        using the default storage.
+        using the default memory resource.
 
         @par Complexity
 
@@ -172,7 +117,7 @@ public:
     /** Constructor.
 
         The constructed value is null,
-        using the specified storage.
+        using the specified memory resource.
 
         @par Complexity
 
@@ -182,9 +127,9 @@ public:
 
         No-throw guarantee.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     explicit
     value(storage_ptr sp) noexcept
@@ -212,7 +157,7 @@ public:
 
         @param other The value to pilfer.
 
-        @see
+        @see @ref pilfer
         
         Pilfering constructors are described in
         <a href="http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0308r0.html">Valueless Variants Considered Harmful</a>, by Peter Dimov.
@@ -223,7 +168,8 @@ public:
     /** Copy constructor.
 
         The value is constructed with a copy of the
-        contents of `other`, using the storage of `other`.
+        contents of `other`, using the same
+        memory resource as `other`.
 
         @par Complexity
 
@@ -232,7 +178,7 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The value to copy.
     */
@@ -244,7 +190,8 @@ public:
     /** Copy constructor
 
         The value is constructed with a copy of the
-        contents of `other`, using the specified storage.
+        contents of `other`, using the
+        specified memory resource.
 
         @par Complexity
 
@@ -252,9 +199,9 @@ public:
 
         @param other The value to copy.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     BOOST_JSON_DECL
     value(
@@ -265,7 +212,7 @@ public:
 
         The value is constructed by acquiring ownership of
         the contents of `other` and shared ownership of
-        the storage of `other`.
+        `other`'s memory resource.
         
         @note
 
@@ -289,7 +236,7 @@ public:
 
         The value is constructed with the contents of
         `other` by move semantics, using the specified
-        storage:
+        memory resource:
 
         @li If `*other.storage() == *sp`, ownership of
         the underlying memory is transferred in constant
@@ -310,13 +257,13 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The value to move.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     BOOST_JSON_DECL
     value(
@@ -350,7 +297,7 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The value to assign from.
     */
@@ -370,7 +317,7 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The value to copy.
     */
@@ -386,7 +333,7 @@ public:
     /** Construct an @ref object.
 
         The value is constructed from `other`, using the
-        same storage. To transfer ownership, use `std::move`:
+        same memory resource. To transfer ownership, use `std::move`:
 
         @par Example
 
@@ -420,7 +367,7 @@ public:
     /** Construct an @ref object.
 
         The value is copy constructed from `other`,
-        using the specified storage.
+        using the specified memory resource.
 
         @par Complexity
 
@@ -429,13 +376,13 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The object to construct with.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     value(
         object const& other,
@@ -449,7 +396,7 @@ public:
     /** Construct an @ref object.
 
         The value is move constructed from `other`,
-        using the specified storage.
+        using the specified memory resource.
 
         @par Complexity
 
@@ -458,19 +405,19 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The object to construct with.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     value(
         object&& other,
         storage_ptr sp)
         : obj_(
-            other,
+            detail::move(other),
             detail::move(sp))
     {
     }
@@ -479,7 +426,7 @@ public:
 
         This is the fastest way to construct
         an empty object, using the specified
-        storage. The variable @ref object_kind
+        memory resource. The variable @ref object_kind
         may be passed as the first parameter
         to select this overload:
 
@@ -501,11 +448,11 @@ public:
 
         No-throw guarantee.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
 
-        @see object_kind
+        @see @ref object_kind
     */
     value(
         object_kind_t,
@@ -517,7 +464,7 @@ public:
     /** Construct an @ref array.
 
         The value is constructed from `other`, using the
-        same storage. To transfer ownership, use `std::move`:
+        same memory resource. To transfer ownership, use `std::move`:
 
         @par Example
 
@@ -551,7 +498,7 @@ public:
     /** Construct an @ref array.
 
         The value is copy constructed from `other`,
-        using the specified storage.
+        using the specified memory resource.
 
         @par Complexity
 
@@ -560,13 +507,13 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The array to construct with.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     value(
         array const& other,
@@ -580,7 +527,7 @@ public:
     /** Construct an @ref array.
 
         The value is move-constructed from `other`,
-        using the specified storage.
+        using the specified memory resource.
 
         @par Complexity
 
@@ -589,13 +536,13 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The array to construct with.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     value(
         array&& other,
@@ -610,7 +557,7 @@ public:
 
         This is the fastest way to construct
         an empty array, using the specified
-        storage. The variable @ref array_kind
+        memory resource. The variable @ref array_kind
         may be passed as the first parameter
         to select this overload:
 
@@ -632,11 +579,11 @@ public:
 
         No-throw guarantee.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
 
-        @see array_kind
+        @see @ref array_kind
     */
     value(
         array_kind_t,
@@ -648,7 +595,7 @@ public:
     /** Construct a @ref string.
 
         The value is constructed from `other`, using the
-        same storage. To transfer ownership, use `std::move`:
+        same memory resource. To transfer ownership, use `std::move`:
 
         @par Example
 
@@ -683,7 +630,7 @@ public:
     /** Construct a @ref string.
 
         The value is copy constructed from `other`,
-        using the specified storage.
+        using the specified memory resource.
 
         @par Complexity
 
@@ -692,13 +639,13 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The string to construct with.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     value(
         string const& other,
@@ -712,7 +659,7 @@ public:
     /** Construct a @ref string.
 
         The value is move constructed from `other`,
-        using the specified storage.
+        using the specified memory resource.
 
         @par Complexity
 
@@ -721,13 +668,13 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The string to construct with.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     value(
         string&& other,
@@ -741,7 +688,7 @@ public:
     /** Construct a @ref string.
 
         The string is constructed with a copy of the
-        string view `s`, using the specified storage.
+        string view `s`, using the specified memory resource.
 
         @par Complexity
 
@@ -750,13 +697,13 @@ public:
         @par Exception Safety
         
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param s The string view to construct with.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     value(
         string_view s,
@@ -769,7 +716,7 @@ public:
 
         The string is constructed with a copy of the
         null-terminated string `s`, using the specified
-        storage.
+        memory resource.
 
         @par Complexity
 
@@ -778,14 +725,14 @@ public:
         @par Exception Safety
         
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param s The null-terminated string to construct
         with.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     value(
         char const* s,
@@ -798,7 +745,7 @@ public:
 
         This is the fastest way to construct
         an empty string, using the specified
-        storage. The variable @ref string_kind
+        memory resource. The variable @ref string_kind
         may be passed as the first parameter
         to select this overload:
 
@@ -820,11 +767,11 @@ public:
 
         No-throw guarantee.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
 
-        @see string_kind
+        @see @ref string_kind
     */
     value(
         string_kind_t,
@@ -845,9 +792,9 @@ public:
 
         @param i The initial value.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     value(
         short i,
@@ -868,9 +815,9 @@ public:
 
         @param i The initial value.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     value(
         int i,
@@ -891,9 +838,9 @@ public:
 
         @param i The initial value.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     value(
         long i,
@@ -914,9 +861,9 @@ public:
 
         @param i The initial value.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     value(
         long long i,
@@ -937,9 +884,9 @@ public:
 
         @param u The initial value.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     value(
         unsigned short u,
@@ -960,9 +907,9 @@ public:
 
         @param u The initial value.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     value(
         unsigned int u,
@@ -983,9 +930,9 @@ public:
 
         @param u The initial value.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     value(
         unsigned long u,
@@ -1006,9 +953,9 @@ public:
 
         @param u The initial value.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     value(
         unsigned long long u,
@@ -1029,9 +976,9 @@ public:
 
         @param d The initial value.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     value(
         double d,
@@ -1052,9 +999,9 @@ public:
 
         @param d The initial value.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     value(
         long double d,
@@ -1067,7 +1014,7 @@ public:
     /** Construct a bool.
 
         This constructs a `bool` value using
-        the specified storage.
+        the specified memory resource.
 
         @par Complexity
 
@@ -1079,11 +1026,11 @@ public:
 
         @param b The initial value.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
-#ifdef GENERATING_DOCUMENTATION
+#ifdef BOOST_JSON_DOCS
     value(
         bool b,
         storage_ptr sp = {}) noexcept;
@@ -1112,9 +1059,9 @@ public:
 
         No-throw guarantee.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     value(
         std::nullptr_t,
@@ -1127,20 +1074,55 @@ public:
 
         If the initializer list consists of key/value
         pairs, an @ref object is created. Otherwise
-        an @ref array is created. The contents of
-        the initializer list are copied to the newly
-        constructed value using the specified storage.
+        an @ref array is created. The contents of the 
+        initializer list are copied to the newly constructed
+        value using the specified memory resource.
 
-        @param init The initializer list to copy. 
+        @par Complexity
 
-        @param sp A pointer to the @ref storage
+        Linear in `init.size()`.
+
+        @par Exception Safety
+
+        Strong guarantee.
+        Calls to `memory_resource::allocate` may throw.
+
+        @param init The initializer list to construct from. 
+
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     BOOST_JSON_DECL
     value(
-        std::initializer_list<value> init,
+        std::initializer_list<value_ref> init,
         storage_ptr sp = {});
+
+    /** Assign an object or array
+
+        If the initializer list consists of key/value
+        pairs, the resulting @ref object is assigned.
+        Otherwise an @ref array is assigned. The contents
+        of the initializer list are moved to `*this`
+        using the existing memory resource.
+
+        @par Complexity
+
+        Linear in `init.size()`.
+
+        @par Exception Safety
+
+        Strong guarantee.
+        Calls to `memory_resource::allocate` may throw.
+
+        @param init The initializer list to assign from.
+    */
+    value&
+    operator=(
+        std::initializer_list<value_ref> init)
+    {
+        return *this = value(init, storage());
+    }
 
     /** Assignment.
 
@@ -1154,14 +1136,14 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
     */
     template<class T
-#ifndef GENERATING_DOCUMENTATION
+#ifndef BOOST_JSON_DOCS
         ,class = typename std::enable_if<
             std::is_constructible<
                 value, T, storage_ptr>::value &&
-            ! std::is_same<detail::remove_cr<
+            ! std::is_same<detail::remove_cvref<
                 T>, value>::value
         >::type
 #endif
@@ -1178,7 +1160,7 @@ public:
     /** Return a reference to an @ref object, changing the kind and replacing the contents.
 
         The value is replaced with an empty @ref object
-        using the current storage, destroying the
+        using the current memory resource, destroying the
         previous contents.
 
         @par Complexity
@@ -1196,7 +1178,7 @@ public:
     /** Return a reference to an @ref array, changing the kind and replacing the contents.
 
         The value is replaced with an empty @ref array
-        using the current storage, destroying the
+        using the current memory resource, destroying the
         previous contents.
 
         @par Complexity
@@ -1214,7 +1196,7 @@ public:
     /** Return a reference to a @ref string, changing the kind and replacing the contents.
 
         The value is replaced with an empty @ref string
-        using the current storage, destroying the
+        using the current memory resource, destroying the
         previous contents.
 
         @par Complexity
@@ -1321,7 +1303,7 @@ public:
     /** Swap the contents.
 
         Exchanges the contents of this value with another
-        value. Ownership of the respective @ref storage
+        value. Ownership of the respective @ref memory_resource
         objects is not transferred.
 
         @li If `*other.storage() == *sp`, ownership of the
@@ -1345,135 +1327,13 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The value to swap with.
     */
     BOOST_JSON_DECL
     void
     swap(value& other);
-
-    //------------------------------------------------------
-    //
-    // Exchange
-    //
-    //------------------------------------------------------
-
-    /// Construct from another type using the specified storage
-    template<
-        class T
-    #ifndef GENERATING_DOCUMENTATION
-        ,class = typename std::enable_if<
-            has_to_json<T>::value>::type
-    #endif
-    >
-    value(
-        T const& t,
-        storage_ptr sp = {})
-        : value(detail::move(sp))
-    {
-        value_exchange<
-            detail::remove_cr<T>
-                >::to_json(t, *this);
-    }
-
-    /// Assign a value from another type
-    template<
-        class T
-    #ifndef GENERATING_DOCUMENTATION
-        ,class = typename std::enable_if<
-            has_to_json<T>::value>::type
-    #endif
-    >
-    value&
-    operator=(T const& t)
-    {
-        value_exchange<
-            detail::remove_cr<T>
-                >::to_json(t, *this);
-        return *this;
-    }
-
-    /** Try to assign a value to another type
-
-        This function attempts to assign the contents of
-        `*this` to the variable `t`.
-
-        @par Complexity
-
-        Linear in the size of `*this`.
-
-        @par Exception Safety
-
-        Strong guarantee.
-
-        @throw system error Thrown upon failure
-    */
-    template<class T>
-    void
-    store(T& t) const
-    {
-        // If this assert goes off, it means that there are no known
-        // ways to convert a JSON value into a user defined type `T`.
-        // There are three ways to fix this:
-        //
-        // 1. Add the member function `T::from_json(value const&)`,
-        //
-        // 2. Add the free function `from_json(T&, value const&)`
-        //    in the same namespace as T, or
-        //
-        // 3. Specialize `json::value_exchange` for `T`, and provide
-        //    the static member `from_json(T&, value const&)`.
-
-        static_assert(
-            has_from_json<T>::value,
-            "Destination type is unknown");
-        value_exchange<
-            detail::remove_cr<T>
-                >::from_json(t, *this);
-    }
-
-    //------------------------------------------------------
-
-    /** Returns `true` if this is an array containing only a key and value.
-
-        This function returns `true` if all the following
-        conditions are met:
-
-        @li @ref kind() returns `kind::array`
-        @li `this->as_array().size() == 2`
-        @li `this->as_array()[0].is_string() == true`
-        
-        Otherwise, the function returns `false`.
-
-        @par Complexity
-
-        Constant.
-    */
-    BOOST_JSON_DECL
-    bool
-    is_key_value_pair() const noexcept;
-
-    /** Returns `true` if the initializer list consists only of key-value pairs.
-
-        This function returns `true` if @ref is_key_value_pair()
-        is true for every element in the initializer list.
-
-        @par Complexity
-
-        Linear in `init.size()`.
-
-        @par Exception Safety
-
-        No-throw guarantee.
-
-        @param init The initializer list to inspect.
-    */
-    static
-    BOOST_JSON_DECL
-    bool
-    maybe_object(
-        std::initializer_list<value> init) noexcept;
 
     //------------------------------------------------------
     //
@@ -1685,9 +1545,9 @@ public:
     //
     //------------------------------------------------------
 
-    /** Return the storage associated with the value.
+    /** Return the memory resource associated with the value.
 
-        This returns a pointer to the storage object
+        This returns a pointer to the memory resource
         that was used to construct the value.
 
         @par Complexity
@@ -2028,15 +1888,13 @@ public:
 
         Strong guarantee.
 
-        @throw system_error `! this->is_object()`
+        @throw object_required_error `! this->is_object()`
     */
     object&
     as_object()
     {
         if(! is_object())
-            BOOST_THROW_EXCEPTION(
-                system_error(
-                    error::not_object));
+            object_required_error::raise();
         return obj_;
     }
 
@@ -2054,15 +1912,13 @@ public:
 
         Strong guarantee.
 
-        @throw system_error `! this->is_object()`
+        @throw object_required_error `! this->is_object()`
     */
     object const&
     as_object() const
     {
         if(! is_object())
-            BOOST_THROW_EXCEPTION(
-                system_error(
-                    error::not_object));
+            object_required_error::raise();
         return obj_;
     }
 
@@ -2080,15 +1936,13 @@ public:
 
         Strong guarantee.
 
-        @throw system_error `! this->is_array()`
+        @throw array_required_error `! this->is_array()`
     */
     array&
     as_array()
     {
         if(! is_array())
-            BOOST_THROW_EXCEPTION(
-                system_error(
-                    error::not_array));
+            array_required_error::raise();
         return arr_;
     }
 
@@ -2106,15 +1960,13 @@ public:
 
         Strong guarantee.
 
-        @throw system_error `! this->is_array()`
+        @throw array_required_error `! this->is_array()`
     */
     array const&
     as_array() const
     {
         if(! is_array())
-            BOOST_THROW_EXCEPTION(
-                system_error(
-                    error::not_array));
+            array_required_error::raise();
         return arr_;
     }
 
@@ -2132,15 +1984,13 @@ public:
 
         Strong guarantee.
 
-        @throw system_error `! this->is_string()`
+        @throw string_required_error `! this->is_string()`
     */
     string&
     as_string()
     {
         if(! is_string())
-            BOOST_THROW_EXCEPTION(
-                system_error(
-                    error::not_string));
+            string_required_error::raise();
         return str_;
     }
 
@@ -2158,15 +2008,13 @@ public:
 
         Strong guarantee.
 
-        @throw system_error `! this->is_string()`
+        @throw string_required_error `! this->is_string()`
     */
     string const&
     as_string() const
     {
         if(! is_string())
-            BOOST_THROW_EXCEPTION(
-                system_error(
-                    error::not_string));
+            string_required_error::raise();
         return str_;
     }
 
@@ -2184,15 +2032,13 @@ public:
 
         Strong guarantee.
 
-        @throw system_error `! this->is_int64()`
+        @throw int64_required_error `! this->is_int64()`
     */
     std::int64_t&
     as_int64()
     {
         if(! is_int64())
-            BOOST_THROW_EXCEPTION(
-                system_error(
-                    error::not_number));
+            int64_required_error::raise();
         return i64_.i;
     }
 
@@ -2210,15 +2056,13 @@ public:
 
         Strong guarantee.
 
-        @throw system_error `! this->is_int64()`
+        @throw int64_required_error `! this->is_int64()`
     */
     std::int64_t
     as_int64() const
     {
         if(! is_int64())
-            BOOST_THROW_EXCEPTION(
-                system_error(
-                    error::not_number));
+            int64_required_error::raise();
         return i64_.i;
     }
 
@@ -2236,18 +2080,15 @@ public:
 
         Strong guarantee.
 
-        @throw system_error `! this->is_uint64()`
+        @throw uint64_required_error `! this->is_uint64()`
     */
     std::uint64_t&
     as_uint64()
     {
         if(! is_uint64())
-            BOOST_THROW_EXCEPTION(
-                system_error(
-                    error::not_number));
+            uint64_required_error::raise();
         return u64_.u;
     }
-
 
     /** Return the underlying `std::uint64_t`, or throw an exception.
 
@@ -2263,15 +2104,13 @@ public:
 
         Strong guarantee.
 
-        @throw system_error `! this->is_uint64()`
+        @throw uint64_required_error `! this->is_uint64()`
     */
     std::uint64_t
     as_uint64() const
     {
         if(! is_uint64())
-            BOOST_THROW_EXCEPTION(
-                system_error(
-                    error::not_number));
+            uint64_required_error::raise();
         return u64_.u;
     }
 
@@ -2289,15 +2128,13 @@ public:
 
         Strong guarantee.
 
-        @throw system_error `! this->is_double()`
+        @throw double_required_error `! this->is_double()`
     */
     double&
     as_double()
     {
         if(! is_double())
-            BOOST_THROW_EXCEPTION(
-                system_error(
-                    error::not_number));
+            double_required_error::raise();
         return dub_.d;
     }
 
@@ -2315,15 +2152,13 @@ public:
 
         Strong guarantee.
 
-        @throw system_error `! this->is_double()`
+        @throw double_required_error `! this->is_double()`
     */
     double
     as_double() const
     {
         if(! is_double())
-            BOOST_THROW_EXCEPTION(
-                system_error(
-                    error::not_number));
+            double_required_error::raise();
         return dub_.d;
     }
 
@@ -2341,15 +2176,13 @@ public:
 
         Strong guarantee.
 
-        @throw system_error `! this->is_bool()`
+        @throw bool_required_error `! this->is_bool()`
     */
     bool&
     as_bool()
     {
         if(! is_bool())
-            BOOST_THROW_EXCEPTION(
-                system_error(
-                    error::not_bool));
+            bool_required_error::raise();
         return bln_.b;
     }
 
@@ -2367,15 +2200,13 @@ public:
 
         Strong guarantee.
 
-        @throw system_error `! this->is_bool()`
+        @throw bool_required_error `! this->is_bool()`
     */
     bool
     as_bool() const
     {
         if(! is_bool())
-            BOOST_THROW_EXCEPTION(
-                system_error(
-                    error::not_bool));
+            bool_required_error::raise();
         return bln_.b;
     }
 
@@ -2747,6 +2578,54 @@ public:
 
     //------------------------------------------------------
 
+    /** Access an element, with bounds checking.
+
+        This function is used to access elements of
+        the underlying object, or throw an exception
+        if the value is not an object.
+
+        @par Complexity
+
+        Constant.
+
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @param key The key of the element to find.
+
+        @return `this->as_object().at( key )`.
+    */
+    value const&
+    at(string_view key) const
+    {
+        return as_object().at(key);
+    }
+
+    /** Access an element, with bounds checking.
+
+        This function is used to access elements of
+        the underlying array, or throw an exception
+        if the value is not an array.
+
+        @par Complexity
+
+        Constant.
+
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @param pos A zero-based array index.
+
+        @return `this->as_array().at( pos )`.
+    */
+    value const&
+    at(std::size_t pos) const
+    {
+        return as_array().at(pos);
+    }
+
 private:
     static
     inline
@@ -2800,8 +2679,8 @@ struct key_value_pair
 
     /** Destructor.
 
-        The value is destroyed and all internal
-        storage is freed.
+        The value is destroyed and all internally
+        allocated memory is freed.
     */
     BOOST_JSON_DECL
     ~key_value_pair();
@@ -2810,7 +2689,7 @@ struct key_value_pair
 
         This constructs a key/value pair with a
         copy of another key/value pair, using
-        the same storage as `other`.
+        the same memory resource as `other`.
 
         @param other The key/value pair to copy.
     */
@@ -2821,13 +2700,13 @@ struct key_value_pair
 
         This constructs a key/value pair with a
         copy of another key/value pair, using
-        the specified storage.
+        the specified memory resource.
 
         @param other The key/value pair to copy.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The element will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     BOOST_JSON_DECL
     key_value_pair(
@@ -2852,14 +2731,14 @@ struct key_value_pair
 
         This constructs a key/value pair. A
         copy of the specified value is made,
-        using the specified storage.
+        using the specified memory resource.
 
         @param p A `std::pair` with the key
             string and @ref value to construct with.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The element will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     explicit
     key_value_pair(
@@ -2883,9 +2762,9 @@ struct key_value_pair
         @param p A `std::pair` with the key
             string and @ref value to construct with.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The element will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     explicit
     key_value_pair(
@@ -2911,6 +2790,14 @@ struct key_value_pair
         return { key_, len_ };
     }
 
+    /** Return the key of this element as a null-terminated string.
+    */
+    char const*
+    key_c_str() const noexcept
+    {
+        return key_;
+    }
+
     /** Return the value of this element.
     */
     json::value const&
@@ -2928,19 +2815,229 @@ struct key_value_pair
     }
 
 private:
-#ifndef GENERATING_DOCUMENTATION
+    static
+    inline
+    std::uint32_t
+    key_size(std::size_t n);
+
+#ifndef BOOST_JSON_DOCS
     // docca emits this when it shouldn't
     friend struct detail::next_access;
 #endif
 
-    key_value_pair* next_;
     json::value value_;
-    std::size_t len_;
     char* key_;
+    std::uint32_t len_;
+    std::uint32_t next_;
 };
+
+//----------------------------------------------------------
+
+#ifdef BOOST_JSON_DOCS
+
+/** Tuple-like element access.
+    
+    This overload permits the key and value
+    of a `key_value_pair` to be accessed
+    by index. For example:
+
+    @code 
+
+    key_value_pair kvp("num", 42);
+    
+    string_view key = get<0>(kvp);
+    value& jv = get<1>(kvp);
+
+    @endcode
+
+    @par Structured Bindings
+
+    When using C++17 or greater, objects of type
+    @ref key_value_pair may be used to initialize
+    structured bindings:
+
+    @code
+
+    key_value_pair kvp("num", 42);
+
+    auto& [key, value] = kvp;
+
+    @endcode
+
+    Depending on the value of `I`, the return type will be:
+
+    @li `string_view const` if `I == 0`, or
+
+    @li `value&`, `value const&`, or `value&&` if `I == 1`.
+    
+    Any other value for `I` is ill-formed.
+
+    @tparam I The element index to access.
+
+    @par Constraints
+
+    `std::is_same_v< std::remove_cvref_t<T>, key_value_pair >`
+
+    @return `kvp.key()` if `I == 0`, or `kvp.value()` 
+    if `I == 1`.
+
+    @param kvp The @ref key_value_pair object
+    to access.
+*/
+template<
+    std::size_t I,
+    class T>
+__see_below__
+get(T&& kvp) noexcept;
+
+#else
+
+template<std::size_t I>
+auto
+get(key_value_pair const&) noexcept ->
+    typename std::conditional<I == 0,
+        string_view const,
+        value const&>::type
+{
+    static_assert(I == 0, 
+        "key_value_pair index out of range");
+}
+
+template<std::size_t I>
+auto
+get(key_value_pair&) noexcept ->
+    typename std::conditional<I == 0,
+        string_view const,
+        value&>::type
+{
+    static_assert(I == 0, 
+        "key_value_pair index out of range");
+}
+
+template<std::size_t I>
+auto
+get(key_value_pair&&) noexcept ->
+    typename std::conditional<I == 0,
+        string_view const,
+        value&&>::type
+{
+    static_assert(I == 0, 
+        "key_value_pair index out of range");
+}
+
+/** Extracts a key_value_pair's key using tuple-like interface
+*/
+template<>
+inline
+string_view const
+get<0>(key_value_pair const& kvp) noexcept 
+{
+    return kvp.key();
+}
+
+/** Extracts a key_value_pair's key using tuple-like interface
+*/
+template<>
+inline
+string_view const
+get<0>(key_value_pair& kvp) noexcept
+{
+    return kvp.key();
+}
+
+/** Extracts a key_value_pair's key using tuple-like interface
+*/
+template<>
+inline
+string_view const
+get<0>(key_value_pair&& kvp) noexcept
+{
+    return kvp.key();
+}
+
+/** Extracts a key_value_pair's value using tuple-like interface
+*/
+template<>
+inline
+value const&
+get<1>(key_value_pair const& kvp) noexcept
+{
+    return kvp.value();
+}
+
+/** Extracts a key_value_pair's value using tuple-like interface
+*/
+template<>
+inline
+value&
+get<1>(key_value_pair& kvp) noexcept
+{
+    return kvp.value();
+}
+
+/** Extracts a key_value_pair's value using tuple-like interface
+*/
+template<>
+inline
+value&&
+get<1>(key_value_pair&& kvp) noexcept
+{
+    return std::move(kvp.value());
+}
+
+#endif
 
 } // json
 } // boost
+
+#ifdef __clang__
+# pragma clang diagnostic push
+# pragma clang diagnostic ignored "-Wmismatched-tags"
+#endif
+
+#ifndef BOOST_JSON_DOCS
+
+namespace std {
+
+/** Tuple-like size access for key_value_pair
+*/
+template<>
+struct tuple_size<::boost::json::key_value_pair>
+    : std::integral_constant<std::size_t, 2> 
+{
+};
+
+/** Tuple-like access for the key type of key_value_pair
+*/
+template<>
+struct tuple_element<0, ::boost::json::key_value_pair> 
+{
+    using type = ::boost::json::string_view const;
+};
+
+/** Tuple-like access for the value type of key_value_pair
+*/
+template<>
+struct tuple_element<1, ::boost::json::key_value_pair> 
+{
+    using type = ::boost::json::value&;
+};
+
+/** Tuple-like access for the value type of key_value_pair
+*/
+template<>
+struct tuple_element<1, ::boost::json::key_value_pair const> 
+{
+    using type = ::boost::json::value const&;
+};
+
+} // std
+
+#endif
+
+#ifdef __clang__
+# pragma clang diagnostic pop
+#endif
 
 // These are here because value, array,
 // and object form cyclic references.
@@ -2959,8 +3056,10 @@ private:
 
 // These must come after array and object
 #include <boost/json/impl/value.hpp>
+#include <boost/json/impl/value_ref.hpp>
 #ifdef BOOST_JSON_HEADER_ONLY
 #include <boost/json/impl/value.ipp>
+#include <boost/json/impl/value_ref.ipp>
 #endif
 
 #endif

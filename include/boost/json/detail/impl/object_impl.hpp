@@ -4,12 +4,13 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/vinniefalco/json
+// Official repository: https://github.com/cppalliance/json
 //
 
 #ifndef BOOST_JSON_DETAIL_IMPL_OBJECT_IMPL_HPP
 #define BOOST_JSON_DETAIL_IMPL_OBJECT_IMPL_HPP
 
+#include <boost/json/detail/digest.hpp>
 #include <boost/json/detail/object_impl.hpp>
 
 namespace boost {
@@ -18,9 +19,11 @@ namespace detail {
 
 struct next_access
 {
+    using index_t = std::uint32_t;
+
     static
     inline
-    key_value_pair*&
+    index_t&
     get(key_value_pair& e) noexcept
     {
         return e.next_;
@@ -28,7 +31,7 @@ struct next_access
 
     static
     inline
-    key_value_pair const*
+    index_t
     get(key_value_pair const& e) noexcept
     {
         return e.next_;
@@ -38,36 +41,168 @@ struct next_access
 void
 object_impl::
 remove(
-    value_type*& head,
-    value_type* p) noexcept
+    index_t& head,
+    value_type& p) noexcept
 {
-    if(head == p)
+    auto const i = index_of(p);
+    if(head == i)
     {
-        head = next(*head);
+        head = next(p);
         return;
     }
-    auto prev = head;
-    while(next(*prev) != p)
-        prev = next(*prev);
-    next(*prev) = next(*p);
+    auto* pn = &next(get(head));
+    while(*pn != i)
+        pn = &next(get(*pn));
+    *pn = next(p);
+}
+
+auto
+object_impl::
+bucket_sizes() noexcept ->
+    bucket_size_array&
+{
+    // Taken from Boost.Intrusive and Boost.MultiIndex code,
+    // thanks to Ion Gaztanaga and Joaquin M Lopez Munoz.
+    static constexpr unsigned long long list[67] = 
+    {
+        0ULL,
+
+        3ULL,                     7ULL,
+        11ULL,                    17ULL,
+        29ULL,                    53ULL,
+        97ULL,                    193ULL,
+        389ULL,                   769ULL,
+        1543ULL,                  3079ULL,
+        6151ULL,                  12289ULL,
+        24593ULL,                 49157ULL,
+        98317ULL,                 196613ULL,
+        393241ULL,                786433ULL,
+        1572869ULL,               3145739ULL,
+        6291469ULL,               12582917ULL,
+        25165843ULL,              50331653ULL,
+        100663319ULL,             201326611ULL,
+        402653189ULL,             805306457ULL,
+        1610612741ULL,            3221225473ULL,
+
+        6442450939ULL,            12884901893ULL,
+        25769803751ULL,           51539607551ULL,
+        103079215111ULL,          206158430209ULL,
+        412316860441ULL,          824633720831ULL,
+        1649267441651ULL,         3298534883309ULL,
+        6597069766657ULL,         13194139533299ULL,
+        26388279066623ULL,        52776558133303ULL,
+        105553116266489ULL,       211106232532969ULL,
+        422212465066001ULL,       844424930131963ULL,
+        1688849860263953ULL,      3377699720527861ULL,
+        6755399441055731ULL,      13510798882111483ULL,
+        27021597764222939ULL,     54043195528445957ULL,
+        108086391056891903ULL,    216172782113783843ULL,
+        432345564227567621ULL,    864691128455135207ULL,
+        1729382256910270481ULL,   3458764513820540933ULL,
+        6917529027641081903ULL,   13835058055282163729ULL,
+        18446744073709551557ULL,  18446744073709551615ULL
+    };
+    return list;
+}
+
+std::size_t
+object_impl::
+bucket_index(
+    std::size_t hash, 
+    std::size_t index) noexcept
+{
+    // Suggested by Joaquin M Lopez Munoz
+    // https://github.com/CPPAlliance/json/issues/115
+    switch(index)
+    {
+        default:
+        case 0: return 0;
+        case 1: return hash % bucket_sizes()[1];
+        case 2: return hash % bucket_sizes()[2];
+        case 3: return hash % bucket_sizes()[3];
+        case 4: return hash % bucket_sizes()[4];
+        case 5: return hash % bucket_sizes()[5];
+        case 6: return hash % bucket_sizes()[6];
+        case 7: return hash % bucket_sizes()[7];
+        case 8: return hash % bucket_sizes()[8];
+        case 9: return hash % bucket_sizes()[9];
+        case 10: return hash % bucket_sizes()[10];
+        case 11: return hash % bucket_sizes()[11];
+        case 12: return hash % bucket_sizes()[12];
+        case 13: return hash % bucket_sizes()[13];
+        case 14: return hash % bucket_sizes()[14];
+        case 15: return hash % bucket_sizes()[15];
+        case 16: return hash % bucket_sizes()[16];
+        case 17: return hash % bucket_sizes()[17];
+        case 18: return hash % bucket_sizes()[18];
+        case 19: return hash % bucket_sizes()[19];
+        case 20: return hash % bucket_sizes()[20];
+        case 21: return hash % bucket_sizes()[21];
+        case 22: return hash % bucket_sizes()[22];
+        case 23: return hash % bucket_sizes()[23];
+        case 24: return hash % bucket_sizes()[24];
+        case 25: return hash % bucket_sizes()[25];
+        case 26: return hash % bucket_sizes()[26];
+        case 27: return hash % bucket_sizes()[27];
+        case 28: return hash % bucket_sizes()[28];
+        case 29: return hash % bucket_sizes()[29];
+        case 30: return hash % bucket_sizes()[30];
+        case 31: return hash % bucket_sizes()[31];
+        case 32: return hash % bucket_sizes()[32];
+        case 33: return hash % bucket_sizes()[33];
+        case 34: return hash % bucket_sizes()[34];
+        case 35: return hash % bucket_sizes()[35];
+        case 36: return hash % bucket_sizes()[36];
+        case 37: return hash % bucket_sizes()[37];
+        case 38: return hash % bucket_sizes()[38];
+        case 39: return hash % bucket_sizes()[39];
+        case 40: return hash % bucket_sizes()[40];
+        case 41: return hash % bucket_sizes()[41];
+        case 42: return hash % bucket_sizes()[42];
+        case 43: return hash % bucket_sizes()[43];
+        case 44: return hash % bucket_sizes()[44];
+        case 45: return hash % bucket_sizes()[45];
+        case 46: return hash % bucket_sizes()[46];
+        case 47: return hash % bucket_sizes()[47];
+        case 48: return hash % bucket_sizes()[48];
+        case 49: return hash % bucket_sizes()[49];
+        case 50: return hash % bucket_sizes()[50];
+        case 51: return hash % bucket_sizes()[51];
+        case 52: return hash % bucket_sizes()[52];
+        case 53: return hash % bucket_sizes()[53];
+        case 54: return hash % bucket_sizes()[54];
+        case 55: return hash % bucket_sizes()[55];
+        case 56: return hash % bucket_sizes()[56];
+        case 57: return hash % bucket_sizes()[57];
+        case 58: return hash % bucket_sizes()[58];
+        case 59: return hash % bucket_sizes()[59];
+        case 60: return hash % bucket_sizes()[60];
+        case 61: return hash % bucket_sizes()[61];
+        case 62: return hash % bucket_sizes()[62];
+        case 63: return hash % bucket_sizes()[63];
+        case 64: return hash % bucket_sizes()[64];
+        case 65: return hash % bucket_sizes()[65];
+        case 66: return hash % bucket_sizes()[66];
+    }
 }
 
 auto
 object_impl::
 bucket(string_view key) const noexcept ->
-    value_type*&
+    index_t&
 {
     auto const hash = digest(key);
-    auto const i = hash % buckets();
-    return bucket_begin()[i];
+    return bucket_begin()[bucket_index(
+        hash, tab_->prime_index)];
 }
 
 auto
 object_impl::
 bucket(std::size_t hash) const noexcept ->
-    value_type*&
+    index_t&
 {
-    return bucket_begin()[hash % buckets()];
+    return bucket_begin()[bucket_index(
+        hash, tab_->prime_index)];
 }
 
 auto
@@ -91,58 +226,48 @@ end() const noexcept ->
 
 auto
 object_impl::
+get(index_t i) const noexcept ->
+    value_type&
+{
+    BOOST_ASSERT(i != null_index);
+    return (reinterpret_cast<
+        value_type*>(tab_ + 1))[i];
+}
+
+auto
+object_impl::
+index_of(value_type const& p) const noexcept ->
+    index_t
+{
+    return static_cast<index_t>(
+        &p - reinterpret_cast<
+            value_type const*>(tab_ + 1));
+}
+
+auto
+object_impl::
 bucket_begin() const noexcept ->
-    value_type**
+    index_t*
 {
     return reinterpret_cast<
-        value_type**>(
+        index_t*>(
             begin() + capacity());
 }
 
 std::size_t
 object_impl::
-digest(string_view key) noexcept
+digest(string_view key) const noexcept
 {
-    return digest(key,
-        std::integral_constant<bool,
-            sizeof(std::size_t) ==
-            sizeof(std::uint64_t)>{});
+    return detail::digest(
+        key.data(), key.size(), salt());
 }
 
 //----------------------------------------------------------
 
-std::uint32_t
-object_impl::
-digest(
-    string_view key,
-    std::false_type) noexcept
-{
-    std::uint32_t prime = 0x01000193UL;
-    std::uint32_t hash  = 0x811C9DC5UL;
-    for(auto p = key.begin(),
-        end = key.end(); p != end; ++p)
-        hash = (*p ^ hash) * prime;
-    return hash;
-}
-
-std::uint64_t
-object_impl::
-digest(
-    string_view key,
-    std::true_type) noexcept
-{
-    std::uint64_t prime = 0x100000001B3ULL;
-    std::uint64_t hash  = 0xcbf29ce484222325ULL;
-    for(auto p = key.begin(),
-        end = key.end(); p != end; ++p)
-        hash = (*p ^ hash) * prime;
-    return hash;
-}
-
 auto
 object_impl::
 next(value_type& e) noexcept ->
-    value_type*&
+    index_t&
 {
     return next_access::get(e);
 }
@@ -150,7 +275,7 @@ next(value_type& e) noexcept ->
 auto
 object_impl::
 next(value_type const& e) noexcept ->
-    value_type const*
+    index_t
 {
     return next_access::get(e);
 }
@@ -170,8 +295,8 @@ relocate(object::value_type* dest) noexcept
 {
     if(size_ > 0)
         std::memcpy(
-            reinterpret_cast<void*>(dest),
-            data_, size_ * sizeof(object::value_type));
+            static_cast<void*>(dest), data_,
+            size_ * sizeof(object::value_type));
     data_ = nullptr;
 }
 

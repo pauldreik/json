@@ -4,14 +4,13 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/vinniefalco/json
+// Official repository: https://github.com/cppalliance/json
 //
 
 #ifndef BOOST_JSON_DETAIL_IMPL_RAW_STACK_IPP
 #define BOOST_JSON_DETAIL_IMPL_RAW_STACK_IPP
 
 #include <boost/json/detail/raw_stack.hpp>
-#include <boost/json/detail/except.hpp>
 #include <cstring>
 
 namespace boost {
@@ -25,8 +24,7 @@ reserve(std::size_t bytes)
     if(bytes <= capacity_)
         return;
     if(bytes > max_size())
-        BOOST_THROW_EXCEPTION(
-            stack_overflow_exception());
+        stack_overflow::raise();
     if( bytes < min_capacity_)
         bytes = min_capacity_;
 
@@ -62,8 +60,7 @@ raw_stack::
 grow(std::size_t n)
 {
     if(n > max_size() - capacity_)
-        BOOST_THROW_EXCEPTION(
-            stack_overflow_exception());
+        stack_overflow::raise();
     reserve(capacity_ + n);
 }
 

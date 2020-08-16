@@ -4,29 +4,73 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/vinniefalco/json
+// Official repository: https://github.com/cppalliance/json
 //
 
 #ifndef BOOST_JSON_ERROR_HPP
 #define BOOST_JSON_ERROR_HPP
 
-#include <boost/json/config.hpp>
+#include <boost/json/detail/config.hpp>
+#ifndef BOOST_JSON_STANDALONE
+# include <boost/system/error_code.hpp>
+# include <boost/system/system_error.hpp>
+#else
+# include <system_error>
+#endif
 
 namespace boost {
 namespace json {
+
+#ifndef BOOST_JSON_STANDALONE
+
+/// The type of error code used by the library.
+using error_code = boost::system::error_code;
+
+/// The type of error category used by the library.
+using error_category = boost::system::error_category;
+
+/// The type of error condition used by the library.
+using error_condition = boost::system::error_condition;
+
+/// The type of system error thrown by the library.
+using system_error = boost::system::system_error;
+
+#ifdef BOOST_JSON_DOCS
+/// Returns the generic error category used by the library.
+error_category const&
+generic_category();
+#else
+using boost::system::generic_category;
+#endif
+
+#else
+
+using error_code = std::error_code;
+using error_category = std::error_category;
+using error_condition = std::error_condition;
+using system_error = std::system_error;
+using std::generic_category;
+
+#endif
 
 /** Error codes returned by JSON operations
 
 */
 enum class error
 {
+    //----------------------------------
+    //
+    // parse errors
+    //
+    //----------------------------------
+
     /// syntax error
     syntax = 1,
 
     /// extra data
     extra_data,
 
-    /// incomplete data
+    /// incomplete JSON
     incomplete,
 
     /// mantissa overflow
@@ -93,6 +137,20 @@ enum class error
     /// expected 'null'
     expected_null,
 
+    /// An object contains too many elements
+    object_too_large,
+
+    /// An array contains too many elements
+    array_too_large,
+
+    /// A key is too large
+    key_too_large,
+
+    /// A string is too large
+    string_too_large,
+
+    //----------------------------------
+
     /// not an object
     not_object,
 
@@ -117,11 +175,8 @@ enum class error
     /// number cast is not exact
     not_exact,
 
-    /// key not found
-    key_not_found,
-
     /// test failure
-    test_failure
+    test_failure,
 };
 
 /** Error conditions corresponding to JSON errors

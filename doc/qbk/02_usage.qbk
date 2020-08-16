@@ -4,7 +4,7 @@
     Distributed under the Boost Software License, Version 1.0. (See accompanying
     file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 
-    Official repository: https://github.com/vinniefalco/json
+    Official repository: https://github.com/cppalliance/json
 ]
 
 [section Usage]
@@ -13,19 +13,19 @@
 * [link json.usage.strings Using Strings]
 * [link json.usage.arrays Using Arrays]
 * [link json.usage.objects Using Objects]
+* [link json.usage.initializer_lists Initializer Lists]
 * [link json.usage.numbers Using Numbers]
-* [link json.usage.storage Storage]
+* [link json.usage.allocators Allocators]
 * [link json.usage.parsing Parsing]
 * [link json.usage.serializing Serializing]
-* [link json.usage.exchange Value Exchange]
-
+* [link json.usage.conversion Value Conversion]
 
 [note
     Sample code and identifiers used throughout are written as if
     the following declarations are in effect:
     ```
     #include <boost/json.hpp>
-    using namespace json;
+    using namespace boost::json;
     ```
 ]
 
@@ -34,9 +34,10 @@
 [include 02_3_arrays.qbk]
 [include 02_4_objects.qbk]
 [include 02_5_numbers.qbk]
-[include 02_6_storage.qbk]
+[include 02_6_allocators.qbk]
 [include 02_7_parsing.qbk]
 [include 02_8_serializing.qbk]
-[include 02_9_exchange.qbk]
+[include 02_9_conversion.qbk]
+[include 02_10_init_lists.qbk]
 
 [endsect]

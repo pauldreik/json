@@ -4,40 +4,18 @@
 # Distributed under the Boost Software License, Version 1.0. (See accompanying
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 #
-# Official repository: https://github.com/vinniefalco/json
+# Official repository: https://github.com/cppalliance/json
 #
 
-source_group (json FILES ${PROJECT_SOURCE_DIR}/include/boost/json.hpp)
-source_group (json FILES ${PROJECT_SOURCE_DIR}/include/boost/pilfer.hpp)
-source_group (TREE ${PROJECT_SOURCE_DIR}/include/boost/json PREFIX json FILES ${PROJECT_FILES})
-
-GroupSources(bench "/")
-
-# Disable auto-linking
-add_definitions(-DBOOST_ALL_NO_LIB=1)
-
-if (MSVC)
-    if (CMAKE_BUILD_TYPE EQUAL "Debug")
-    else()
-        add_compile_options(
-            /GL         # Whole program optimization
-            /Ob2        # inline any suitable
-            )
-
-        add_link_options(
-            /LTCG       # Link Time Code Generation
-            )
-    endif()
-endif()
-
-add_executable (bench
-    ${BEAST_FILES}
-    ${PROJECT_FILES}
-    ${PROJECT_SOURCE_DIR}/include/boost/json.hpp
-    ${PROJECT_SOURCE_DIR}/include/boost/pilfer.hpp
-    ${PROJECT_SOURCE_DIR}/src/src.cpp
+source_group("" FILES
     Jamfile
     bench.cpp
 )
 
-add_test(json-tests json-tests)
+add_executable(bench
+    Jamfile
+    bench.cpp
+)
+
+target_include_directories(bench PRIVATE ../test)
+target_link_libraries(bench PRIVATE Boost::json)

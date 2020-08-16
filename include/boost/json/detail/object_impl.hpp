@@ -4,14 +4,15 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/vinniefalco/json
+// Official repository: https://github.com/cppalliance/json
 //
 
 #ifndef BOOST_JSON_DETAIL_OBJECT_IMPL_HPP
 #define BOOST_JSON_DETAIL_OBJECT_IMPL_HPP
 
-#include <boost/json/config.hpp>
+#include <boost/json/detail/config.hpp>
 #include <boost/json/storage_ptr.hpp>
+#include <boost/json/string_view.hpp>
 #include <cstddef>
 #include <cstring>
 #include <type_traits>
@@ -25,6 +26,11 @@ namespace detail {
 
 class object_impl
 {
+    using index_t = std::uint32_t;
+    static index_t const null_index =
+        std::uint32_t(-1);
+    using bucket_size_array = const unsigned long long[67];
+
     BOOST_JSON_DECL
     void
     do_destroy(storage_ptr const& sp) noexcept;
@@ -38,7 +44,9 @@ public:
     inline
     object_impl(
         std::size_t capacity,
+        std::size_t prime_index,
         std::size_t buckets,
+        std::uintptr_t salt,
         storage_ptr const& sp);
 
     inline
@@ -48,7 +56,7 @@ public:
     destroy(storage_ptr const& sp) noexcept
     {
         if( tab_ == nullptr ||
-            ! sp->need_free())
+            sp.is_not_counted_and_deallocate_is_null())
             return;
         do_destroy(sp);
     }
@@ -65,6 +73,13 @@ public:
         return tab_ ? tab_->capacity : 0;
     }
 
+    std::uintptr_t
+    salt() const noexcept
+    {
+        return tab_ ? tab_->salt :
+            reinterpret_cast<std::uintptr_t>(this);
+    }
+
     inline
     value_type*
     begin() const noexcept;
@@ -72,6 +87,14 @@ public:
     inline
     value_type*
     end() const noexcept;
+
+    inline
+    value_type&
+    get(index_t i) const noexcept;
+
+    inline
+    index_t
+    index_of(value_type const& p) const noexcept;
 
     inline
     void
@@ -109,66 +132,65 @@ public:
     inline
     void
     remove(
-        value_type*& head,
-        value_type* p) noexcept;
+        index_t& head,
+        value_type& p) noexcept;
+
+    static
+    inline
+    bucket_size_array&
+    bucket_sizes() noexcept;
+
+    static
+    inline
+    std::size_t
+    bucket_index(
+        std::size_t hash,
+        std::size_t index) noexcept;
 
     inline
-    value_type*&
+    index_t&
     bucket(std::size_t hash) const noexcept;
 
     inline
-    value_type*&
+    index_t&
     bucket(string_view key) const noexcept;
+
+    static
+    inline
+    index_t&
+    next(value_type& e) noexcept;
+
+    static
+    inline
+    index_t
+    next(value_type const& e) noexcept;
 
     inline
     void
     swap(object_impl& rhs) noexcept;
 
-    static
     inline
     std::size_t
-    digest(string_view key) noexcept;
+    digest(string_view key) const noexcept;
 
 private:
-    static
-    inline
-    std::uint32_t
-    digest(
-        string_view key,
-        std::false_type) noexcept;
-
-    static
-    inline
-    std::uint64_t
-    digest(
-        string_view key,
-        std::true_type) noexcept;
-
     std::size_t
     buckets() const noexcept
     {
-        return tab_ ? tab_->buckets : 0;
+        BOOST_ASSERT(tab_);
+        return bucket_sizes()[tab_->prime_index];
     }
 
     inline
-    value_type**
+    index_t*
     bucket_begin() const noexcept;
-
-    static
-    inline
-    value_type*&
-    next(value_type& e) noexcept;
-
-    static
-    inline
-    value_type const*
-    next(value_type const& e) noexcept;
 
     struct table
     {
         std::size_t size;
         std::size_t const capacity;
-        std::size_t const buckets;
+        std::size_t const prime_index;
+        std::uintptr_t const salt;
     };
 
     table* tab_ = nullptr;

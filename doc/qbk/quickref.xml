@@ -7,7 +7,7 @@
   Distributed under the Boost Software License, Version 1.0. (See accompanying
   file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 
-  Official repository: https://github.com/vinniefalco/json
+  Official repository: https://github.com/cppalliance/json
 -->
 
 <informaltable frame="all">
@@ -24,11 +24,10 @@
           <member><link linkend="json.ref.boost__json__basic_parser">basic_parser</link></member>
           <member><link linkend="json.ref.boost__json__key_value_pair">key_value_pair</link></member>
           <member><link linkend="json.ref.boost__json__object">object</link></member>
+          <member><link linkend="json.ref.boost__json__monotonic_resource">monotonic_resource</link></member>
           <member><link linkend="json.ref.boost__json__parser">parser</link></member>
-          <member><link linkend="json.ref.boost__json__pool">pool</link></member>
-          <member><link linkend="json.ref.boost__json__scoped_storage">scoped_storage</link></member>
+          <member><link linkend="json.ref.boost__json__parse_options">parse_options</link></member>
           <member><link linkend="json.ref.boost__json__serializer">serializer</link></member>
-          <member><link linkend="json.ref.boost__json__storage">storage</link></member>
           <member><link linkend="json.ref.boost__json__storage_ptr">storage_ptr</link></member>
           <member><link linkend="json.ref.boost__json__string">string</link></member>
           <member><link linkend="json.ref.boost__json__value">value</link></member>
@@ -37,18 +36,21 @@
       <entry valign="top">
         <bridgehead renderas="sect3">Functions</bridgehead>
         <simplelist type="vert" columns="1">
-          <member><link linkend="json.ref.boost__json__make_storage">make_storage</link></member>
+          <member><link linkend="json.ref.boost__json__get">get</link></member>
+          <member><link linkend="json.ref.boost__json__make_counted_resource">make_counted_resource</link></member>
           <member><link linkend="json.ref.boost__json__number_cast">number_cast</link></member>
           <member><link linkend="json.ref.boost__json__parse">parse</link></member>
           <member><link linkend="json.ref.boost__json__swap">swap</link></member>
           <member><link linkend="json.ref.boost__json__to_string">to_string</link></member>
+          <member><link linkend="json.ref.boost__json__value_from">value_from</link></member>
+          <member><link linkend="json.ref.boost__json__value_to">value_to</link></member>
         </simplelist>
         <bridgehead renderas="sect3">Type Traits</bridgehead>
         <simplelist type="vert" columns="1">
-          <member><link linkend="json.ref.boost__json__has_from_json">has_from_json</link></member>
-          <member><link linkend="json.ref.boost__json__has_to_json">has_to_json</link></member>
-          <member><link linkend="json.ref.boost__json__is_storage">is_storage</link></member>
-          <member><link linkend="json.ref.boost__json__value_exchange">value_exchange</link></member>
+          <member><link linkend="json.ref.boost__json__has_value_from">has_value_from</link></member>
+          <member><link linkend="json.ref.boost__json__has_value_to">has_value_to</link></member>
+          <member><link linkend="json.ref.boost__json__value_from_tag">value_from_tag</link></member>
+          <member><link linkend="json.ref.boost__json__value_to_tag">value_to_tag</link></member>
         </simplelist>
       </entry>
       <entry valign="top">
@@ -62,8 +64,6 @@
           <member><link linkend="json.ref.boost__json__operator_gt_">operator&gt;</link></member>
           <member><link linkend="json.ref.boost__json__operator_lt__lt_">operator&lt;&lt;</link></member>
         </simplelist>
-      </entry>
-      <entry valign="top">
         <bridgehead renderas="sect3">Constants</bridgehead>
         <simplelist type="vert" columns="1">
           <member><link linkend="json.ref.boost__json__array_kind">array_kind</link></member>
@@ -72,6 +72,28 @@
           <member><link linkend="json.ref.boost__json__kind">kind</link></member>
           <member><link linkend="json.ref.boost__json__object_kind">object_kind</link></member>
           <member><link linkend="json.ref.boost__json__string_kind">string_kind</link></member>
+        </simplelist>
+      </entry>
+      <entry valign="top">
+        <bridgehead renderas="sect3">Exceptions</bridgehead>
+        <simplelist type="vert" columns="1">
+          <member><link linkend="json.ref.boost__json__array_index_error">array_index_error</link></member>
+          <member><link linkend="json.ref.boost__json__array_required_error">array_required_error</link></member>
+          <member><link linkend="json.ref.boost__json__array_too_large">array_too_large</link></member>
+          <member><link linkend="json.ref.boost__json__bool_required_error">bool_required_error</link></member>
+          <member><link linkend="json.ref.boost__json__char_pos_error">char_pos_error</link></member>
+          <member><link linkend="json.ref.boost__json__double_required_error">double_required_error</link></member>
+          <member><link linkend="json.ref.boost__json__int64_required_error">int64_required_error</link></member>
+          <member><link linkend="json.ref.boost__json__key_not_found">key_not_found</link></member>
+          <member><link linkend="json.ref.boost__json__key_too_large">key_too_large</link></member>
+          <member><link linkend="json.ref.boost__json__number_required_error">number_required_error</link></member>
+          <member><link linkend="json.ref.boost__json__object_required_error">object_required_error</link></member>
+          <member><link linkend="json.ref.boost__json__object_too_large">object_too_large</link></member>
+          <member><link linkend="json.ref.boost__json__stack_overflow">stack_overflow</link></member>
+          <member><link linkend="json.ref.boost__json__string_required_error">string_required_error</link></member>
+          <member><link linkend="json.ref.boost__json__string_too_large">string_too_large</link></member>
+          <member><link linkend="json.ref.boost__json__type_error">type_error</link></member>
+          <member><link linkend="json.ref.boost__json__uint64_required_error">uint64_required_error</link></member>
         </simplelist>
       </entry>
       <entry valign="top">

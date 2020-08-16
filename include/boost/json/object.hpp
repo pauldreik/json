@@ -4,15 +4,16 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/vinniefalco/json
+// Official repository: https://github.com/cppalliance/json
 //
 
 #ifndef BOOST_JSON_OBJECT_HPP
 #define BOOST_JSON_OBJECT_HPP
 
-#include <boost/json/config.hpp>
+#include <boost/json/detail/config.hpp>
 #include <boost/json/kind.hpp>
 #include <boost/json/storage_ptr.hpp>
+#include <boost/json/string_view.hpp>
 #include <boost/json/detail/object_impl.hpp>
 #include <boost/pilfer.hpp>
 #include <cstdlib>
@@ -25,6 +26,11 @@ namespace boost {
 namespace json {
 
 class value;
+class value_ref;
+
+#ifndef BOOST_JSON_DOCS
+class object_test;
+#endif
 
 /** A dynamically sized associative container of JSON key/value pairs.
 
@@ -54,10 +60,10 @@ class value;
     be used to eliminate reallocations if the number of
     elements is known beforehand.
 
-    @par Storage
+    @par Allocators
 
     All elements stored in the container, and their
-    children if any, will use the same storage that
+    children if any, will use the same memory resource that
     was used to construct the container.
 
     @par Thread Safety
@@ -77,6 +83,9 @@ class object
 {
     using object_impl =
         detail::object_impl;
+    using index_t = std::uint32_t;
+    static index_t const null_index =
+        std::uint32_t(-1);
 
     storage_ptr sp_;    // must come first
     kind k_ =           // must come second
@@ -99,6 +108,10 @@ class object
     {
         return 1.0;
     }
+
+    friend class object_test;
+    BOOST_JSON_DECL
+    object(object_test const*);
 
 public:
     /** The type of keys.
@@ -146,17 +159,13 @@ public:
     using const_reverse_iterator =
         std::reverse_iterator<const_iterator>;
 
-    /// The type of initializer lists
-    using init_list = std::initializer_list<
-        std::pair<key_type, value>>;
-
     //------------------------------------------------------
 
     /** Destructor.
 
         The destructor for each element is called if needed,
         any used memory is deallocated, and shared ownership
-        of the @ref storage is released.
+        of the @ref memory_resource is released.
 
         @par Complexity
 
@@ -168,7 +177,7 @@ public:
         impl_.destroy(sp_);
     }
 
-#ifndef GENERATING_DOCUMENTATION
+#ifndef BOOST_JSON_DOCS
     // private
     BOOST_JSON_DECL
     explicit
@@ -180,7 +189,7 @@ public:
     /** Default constructor.
 
         The constructed object is empty with zero
-        capacity, using the default storage.
+        capacity, using the default memory resource.
 
         @par Complexity
 
@@ -195,7 +204,7 @@ public:
     /** Constructor.
 
         The constructed object is empty with zero
-        capacity, using the specified storage.
+        capacity, using the specified memory resource.
 
         @par Complexity
 
@@ -205,9 +214,9 @@ public:
 
         No-throw guarantee.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     BOOST_JSON_DECL
     explicit
@@ -217,7 +226,7 @@ public:
 
         The constructed object is empty with capacity
         equal to the specified minimum capacity,
-        using the specified storage.
+        using the specified memory resource.
 
         @par Complexity
 
@@ -226,15 +235,15 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param min_capacity The minimum number
         of elements for which capacity is guaranteed
         without a subsequent reallocation.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     BOOST_JSON_DECL
     object(
@@ -245,7 +254,7 @@ public:
 
         The object is constructed with the elements
         in the range `{first, last)`, preserving order,
-        using the specified storage.
+        using the specified memory resource.
         If multiple elements in the range have keys that
         compare equivalent, only the first occurring key
         will be inserted.
@@ -265,7 +274,7 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param first An input iterator pointing to the
         first element to insert, or pointing to the end
@@ -280,16 +289,16 @@ public:
         Upon construction, @ref capacity() will be greater
         than or equal to this number.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
 
         @tparam InputIt a type meeting the requirements of
         __InputIterator__.
     */
     template<
         class InputIt
-    #ifndef GENERATING_DOCUMENTATION
+    #ifndef BOOST_JSON_DOCS
         ,class = is_inputit<InputIt>
     #endif
     >
@@ -302,13 +311,13 @@ public:
     /** Move constructor.
 
         The object is constructed by acquiring ownership of
-        the contents of `other` and shared ownership of
-        the storage of `other`.
+        the contents of `other` and shared ownership
+        of `other`'s memory resource.
 
         @note
 
         After construction, the moved-from object behaves
-        as if newly constructed with its current storage.
+        as if newly constructed with its current memory resource.
         
         @par Complexity
 
@@ -327,7 +336,7 @@ public:
 
         The object is constructed with the contents of
         `other` by move semantics, using the specified
-        storage:
+        memory resource:
 
         @li If `*other.storage() == *sp`, ownership of
         the underlying memory is transferred in constant
@@ -348,13 +357,13 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The object to move.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     BOOST_JSON_DECL
     object(
@@ -381,7 +390,7 @@ public:
 
         @param other The object to pilfer.
 
-        @see
+        @see @ref pilfer
         
         Pilfering constructors are described in
         <a href="http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0308r0.html">Valueless Variants Considered Harmful</a>, by Peter Dimov.
@@ -392,7 +401,7 @@ public:
     /** Copy constructor.
 
         The object is constructed with a copy of the
-        contents of `other`, using the storage of `other`.
+        contents of `other`, using `other`'s memory resource.
 
         @par Complexity
 
@@ -401,7 +410,7 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The object to copy.
     */
@@ -412,7 +421,7 @@ public:
     /** Copy constructor.
 
         The object is constructed with a copy of the
-        contents of `other`, using the specified storage.
+        contents of `other`, using the specified memory resource.
 
         @par Complexity
 
@@ -421,13 +430,13 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The object to copy.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     BOOST_JSON_DECL
     object(
@@ -438,7 +447,7 @@ public:
 
         The object is constructed with a copy of the values
         in the initializer-list in order, using the
-        specified storage.
+        specified memory resource.
         If multiple elements in the range have keys that
         compare equivalent, only the first occurring key
         will be inserted.
@@ -450,16 +459,17 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param init The initializer list to insert.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     object(
-        init_list init,
+        std::initializer_list<
+            std::pair<key_type, value_ref>> init,
         storage_ptr sp = {})
         : object(init, 0, std::move(sp))
     {
@@ -471,7 +481,7 @@ public:
         reserved, and then
         the object is constructed with a copy of the values
         in the initializer-list in order, using the
-        specified storage.
+        specified memory resource.
         If multiple elements in the range have keys that
         compare equivalent, only the first occurring key
         will be inserted.
@@ -483,7 +493,7 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param init The initializer list to insert.
 
@@ -493,13 +503,14 @@ public:
         Upon construction, @ref capacity() will be greater
         than or equal to this number.
 
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     BOOST_JSON_DECL
     object(
-        init_list init,
+        std::initializer_list<
+            std::pair<key_type, value_ref>> init,
         std::size_t min_capacity,
         storage_ptr sp = {});
 
@@ -529,7 +540,7 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The object to move.
     */
@@ -549,7 +560,7 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The object to copy.
     */
@@ -571,19 +582,20 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param init The initializer list to copy.
     */
     BOOST_JSON_DECL
     object&
-    operator=(init_list init);
+    operator=(std::initializer_list<
+        std::pair<key_type, value_ref>> init);
 
     //------------------------------------------------------
 
-    /** Return the storage used by the object.
+    /** Return the memory resource used by the object.
 
-        This returns the storage used by the object
+        This returns the memory resource used by the object
         for all elements and all internal allocations.
 
         @par Complexity
@@ -842,7 +854,7 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param new_capacity The new minimum capacity.
 
@@ -897,7 +909,7 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
         
         @param p The value to insert.
 
@@ -911,7 +923,7 @@ public:
         the assignment took place.
     */
      template<class P
-#ifndef GENERATING_DOCUMENTATION
+#ifndef BOOST_JSON_DOCS
         ,class = typename std::enable_if<
             std::is_constructible<
                 value_type, P, storage_ptr>::value>::type
@@ -945,7 +957,7 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
         
         @param first An input iterator pointing to the first
         element to insert, or pointing to the end of the range.
@@ -958,7 +970,7 @@ public:
     */
     template<
         class InputIt
-    #ifndef GENERATING_DOCUMENTATION
+    #ifndef BOOST_JSON_DOCS
         ,class = is_inputit<InputIt>
     #endif
     >
@@ -983,13 +995,14 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
         
         @param init The initializer list to insert
     */
     BOOST_JSON_DECL
     void
-    insert(init_list init);
+    insert(std::initializer_list<
+        std::pair<key_type, value_ref>> init);
 
     /** Insert an element or assign to the current element if the key already exists.
 
@@ -1014,7 +1027,7 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param key The key used for lookup and insertion
 
@@ -1054,7 +1067,7 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param key The key used for lookup and insertion
 
@@ -1126,7 +1139,7 @@ public:
     /** Swap the contents.
 
         Exchanges the contents of this object with another
-        object. Ownership of the respective @ref storage
+        object. Ownership of the respective @ref memory_resource
         objects is not transferred.
 
         @li If `*other.storage() == *sp`, ownership of the
@@ -1145,7 +1158,7 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The object to swap with.
     */
@@ -1168,7 +1181,7 @@ public:
 
         Constant on average, worst case linear in @ref size().
 
-        @param key The key of the element to find
+        @param key The key of the element to find.
 
         @throw std::out_of_range if no such element exists.
     */
@@ -1185,7 +1198,7 @@ public:
 
         Constant on average, worst case linear in @ref size().
 
-        @param key The key of the element to find
+        @param key The key of the element to find.
 
         @throw std::out_of_range if no such element exists.
     */
@@ -1213,11 +1226,11 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+        Calls to `memory_resource::allocate` may throw.
         If an exception is thrown by any operation, the
         insertion has no effect.
 
-        @param key The key of the element to find
+        @param key The key of the element to find.
     */
     BOOST_JSON_DECL
     value&
@@ -1237,7 +1250,7 @@ public:
 
         No-throw guarantee.
 
-        @param key The key of the element to find
+        @param key The key of the element to find.
     */
     BOOST_JSON_DECL
     std::size_t
@@ -1257,7 +1270,7 @@ public:
 
         No-throw guarantee.
 
-        @param key The key of the element to find
+        @param key The key of the element to find.
     */
     BOOST_JSON_DECL
     iterator
@@ -1277,7 +1290,7 @@ public:
 
         No-throw guarantee.
 
-        @param key The key of the element to find
+        @param key The key of the element to find.
     */
     BOOST_JSON_DECL
     const_iterator
@@ -1295,7 +1308,7 @@ public:
 
         No-throw guarantee.
 
-        @param key The key of the element to find
+        @param key The key of the element to find.
 
         @see find.
     */
@@ -1310,16 +1323,6 @@ private:
     template<class It>
     using iter_cat = typename
         std::iterator_traits<It>::iterator_category;
-
-    static
-    inline
-    value_type*&
-    next(value_type& e) noexcept;
-
-    static
-    inline
-    value_type const*
-    next(value_type const& e) noexcept;
 
     BOOST_JSON_DECL
     std::pair<value_type*, std::size_t>
@@ -1391,7 +1394,7 @@ private:
 
     Exchanges the contents of the object `lhs` with
     another object `rhs`. Ownership of the respective
-    @ref storage objects is not transferred.
+    @ref memory_resource objects is not transferred.
 
     @li If `*lhs.storage() == *rhs.storage()`,
     ownership of the underlying memory is swapped in
@@ -1414,7 +1417,7 @@ private:
     @par Exception Safety
 
     Strong guarantee.
-    Calls to @ref storage::allocate may throw.
+    Calls to `memory_resource::allocate` may throw.
 
     @param lhs The object to exchange.
 

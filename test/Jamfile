@@ -4,7 +4,7 @@
 # Distributed under the Boost Software License, Version 1.0. (See accompanying
 # file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 #
-# Official repository: https://github.com/vinniefalco/json
+# Official repository: https://github.com/cppalliance/json
 #
 
 import testing ;
@@ -25,22 +25,28 @@ else
 }
 
 local SOURCES =
-    _detail_number.cpp
     array.cpp
     basic_parser.cpp
     error.cpp
+    except.cpp
     json.cpp
     kind.cpp
+    memory_resource.cpp
+    monotonic_resource.cpp
     number_cast.cpp
     object.cpp
     parser.cpp
-    pool.cpp
+    pilfer.cpp
     serializer.cpp
     snippets.cpp
-    storage.cpp
     storage_ptr.cpp
     string.cpp
+    string_view.cpp
+    system_error.cpp
+    value_from.cpp
     value.cpp
+    value_to.cpp
+    value_ref.cpp
     ryu/d2s_intrinsics_test.cpp
     ryu/d2s_table_test.cpp
     ryu/d2s_test.cpp
@@ -57,6 +63,7 @@ for local f in $(SOURCES)
     RUN_TESTS += [
         run $(f) main.cpp : : :
             $(LIB)
+            <include>.
         ] ;
 }
 
@@ -65,9 +72,10 @@ for local f in $(LIMIT_SOURCES)
     RUN_TESTS += [
         run $(f) main.cpp : : :
             <source>../src/src.cpp
+            <include>.
             <define>BOOST_JSON_MAX_STRING_SIZE=1000
-            <define>BOOST_JSON_MAX_OBJECT_SIZE=30
-            <define>BOOST_JSON_MAX_ARRAY_SIZE=100
+            <define>BOOST_JSON_MAX_OBJECT_SIZE=20
+            <define>BOOST_JSON_MAX_ARRAY_SIZE=20
             <define>BOOST_JSON_MAX_STACK_SIZE=1024
             <define>BOOST_JSON_PARSER_BUFFER_SIZE=256
         ] ;

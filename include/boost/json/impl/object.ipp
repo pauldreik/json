@@ -4,19 +4,18 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/vinniefalco/json
+// Official repository: https://github.com/cppalliance/json
 //
 
 #ifndef BOOST_JSON_IMPL_OBJECT_IPP
 #define BOOST_JSON_IMPL_OBJECT_IPP
 
+#include <boost/json/except.hpp>
 #include <boost/json/object.hpp>
-#include <boost/json/detail/except.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
-#include <memory>
 #include <new>
 #include <stdexcept>
 #include <type_traits>
@@ -45,7 +44,7 @@ public:
             auto p1 = self_.impl_.begin() + last;
             for(auto it = p0; it != p1; ++it)
                 self_.impl_.remove(
-                    self_.impl_.bucket(it->key()), it);
+                    self_.impl_.bucket(it->key()), *it);
             detail::destroy(p0, last - first);
         }
     }
@@ -73,6 +72,13 @@ public:
 // object
 //
 //----------------------------------------------------------
+
+object::
+object(object_test const*)
+{
+    object_impl impl(3, 1, 3, 0, sp_);
+    impl_.swap(impl);
+}
 
 object::
 object(detail::unchecked_object&& uo)
@@ -160,16 +166,48 @@ object(
 
 object::
 object(
-    init_list init,
+    std::initializer_list<std::pair<
+        key_type, value_ref>> init,
     std::size_t min_capacity,
     storage_ptr sp)
     : sp_(std::move(sp))
 {
     undo_construct u(this);
-    insert_range(
-        init.begin(),
-        init.end(),
-        min_capacity);
+    using FwdIt = std::pair<
+        key_type, value_ref> const*;
+    struct place_impl : place_range
+    {
+        FwdIt it;
+        std::size_t n;
+        storage_ptr const& sp;
+
+        place_impl(
+            FwdIt it_,
+            std::size_t n_,
+            storage_ptr const& sp_)
+            : it(it_)
+            , n(n_)
+            , sp(sp_)
+        {
+        }
+
+        bool
+        operator()(void* dest) override
+        {
+            if(n-- == 0)
+                return false;
+            ::new(dest) value_type(
+                it->first,
+                it->second.make_value(sp));
+            ++it;
+            return true;
+        }
+    };
+    if( min_capacity < init.size())
+        min_capacity = init.size();
+    place_impl f(
+        init.begin(), init.size(), sp_);
+    insert_range_impl(min_capacity, f);
     u.self = nullptr;
 }
 
@@ -198,7 +236,8 @@ operator=(object const& other)
 object&
 object::
 operator=(
-    init_list init)
+    std::initializer_list<std::pair<
+        key_type, value_ref>> init)
 {
     object tmp(init, sp_);
     this->~object();
@@ -221,12 +260,46 @@ clear() noexcept
 
 void
 object::
-insert(init_list init)
+insert(
+    std::initializer_list<std::pair<
+        key_type, value_ref>> init)
 {
-    insert_range(
-        init.begin(),
-        init.end(),
-        init.size());
+    using FwdIt = std::pair<
+        key_type, value_ref> const*;
+    struct place_impl : place_range
+    {
+        FwdIt it;
+        std::size_t n;
+        storage_ptr const& sp;
+
+        place_impl(
+            FwdIt it_,
+            std::size_t n_,
+            storage_ptr const& sp_)
+            : it(it_)
+            , n(n_)
+            , sp(sp_)
+        {
+        }
+
+        bool
+        operator()(void* dest) override
+        {
+            if(n-- == 0)
+                return false;
+            ::new(dest) value_type(
+                it->first,
+                it->second.make_value(sp));
+            ++it;
+            return true;
+        }
+    };
+    auto const n0 = size();
+    if(init.size() > max_size() - n0)
+        object_too_large::raise();
+    place_impl f(
+        init.begin(), init.size(), sp_);
+    insert_range_impl(n0 + init.size(), f);
 }
 
 auto
@@ -237,7 +310,7 @@ erase(const_iterator pos) noexcept ->
     auto p = impl_.begin() +
         (pos - impl_.begin());
     impl_.remove(
-        impl_.bucket(p->key()), p);
+        impl_.bucket(p->key()), *p);
     p->~value_type();
     impl_.shrink(1);
     if(p != impl_.end())
@@ -245,13 +318,14 @@ erase(const_iterator pos) noexcept ->
         auto pb = impl_.end();
         auto& head =
             impl_.bucket(pb->key());
-        impl_.remove(head, pb);
+        impl_.remove(head, *pb);
+        // the casts silence warnings
         std::memcpy(
-            reinterpret_cast<void*>(p),
-            reinterpret_cast<void const*>(pb),
+            static_cast<void*>(p),
+            static_cast<void const*>(pb),
             sizeof(*p));
-        next(*p) = head;
-        head = p;
+        impl_.next(*p) = head;
+        head = impl_.index_of(*p);
     }
     return p;
 }
@@ -303,9 +377,7 @@ at(key_type key) ->
 {
     auto it = find(key);
     if(it == end())
-        BOOST_THROW_EXCEPTION(
-         std::out_of_range(
-            "key not found"));
+        key_not_found::raise();
     return it->value();
 }
     
@@ -316,9 +388,7 @@ at(key_type key) const ->
 {
     auto it = find(key);
     if(it == end())
-        BOOST_THROW_EXCEPTION(
-         std::out_of_range(
-            "key not found"));
+        key_not_found::raise();
     return it->value();
 }
 
@@ -387,8 +457,7 @@ find_impl(key_type key) const noexcept ->
     std::pair<
         value_type*,
         std::size_t> result;
-    result.second =
-        object_impl::digest(key);
+    result.second = impl_.digest(key);
     if(empty())
     {
         result.first = nullptr;
@@ -396,10 +465,14 @@ find_impl(key_type key) const noexcept ->
     }
     auto const& head =
         impl_.bucket(result.second);
-    auto it = head;
-    while(it && it->key() != key)
-        it = next(*it);
-    result.first = it;
+    auto i = head;
+    while(i != null_index &&
+        impl_.get(i).key() != key)
+        i = impl_.next(impl_.get(i));
+    if(i != null_index)
+        result.first = &impl_.get(i);
+    else
+        result.first = nullptr;
     return result;
 }
 
@@ -411,74 +484,38 @@ rehash(std::size_t new_capacity)
     auto const next_prime =
     [](std::size_t n) noexcept
     {
-        // Taken from Boost.Intrusive and Boost.MultiIndex code,
-        // thanks to Ion Gaztanaga and Joaquin M Lopez Munoz.
-        static unsigned long long constexpr list[] = {
-            0ULL,
-
-            3ULL,                     7ULL,
-            11ULL,                    17ULL,
-            29ULL,                    53ULL,
-            97ULL,                    193ULL,
-            389ULL,                   769ULL,
-            1543ULL,                  3079ULL,
-            6151ULL,                  12289ULL,
-            24593ULL,                 49157ULL,
-            98317ULL,                 196613ULL,
-            393241ULL,                786433ULL,
-            1572869ULL,               3145739ULL,
-            6291469ULL,               12582917ULL,
-            25165843ULL,              50331653ULL,
-            100663319ULL,             201326611ULL,
-            402653189ULL,             805306457ULL,
-            1610612741ULL,            3221225473ULL,
-
-            6442450939ULL,            12884901893ULL,
-            25769803751ULL,           51539607551ULL,
-            103079215111ULL,          206158430209ULL,
-            412316860441ULL,          824633720831ULL,
-            1649267441651ULL,         3298534883309ULL,
-            6597069766657ULL,         13194139533299ULL,
-            26388279066623ULL,        52776558133303ULL,
-            105553116266489ULL,       211106232532969ULL,
-            422212465066001ULL,       844424930131963ULL,
-            1688849860263953ULL,      3377699720527861ULL,
-            6755399441055731ULL,      13510798882111483ULL,
-            27021597764222939ULL,     54043195528445957ULL,
-            108086391056891903ULL,    216172782113783843ULL,
-            432345564227567621ULL,    864691128455135207ULL,
-            1729382256910270481ULL,   3458764513820540933ULL,
-            6917529027641081903ULL,   13835058055282163729ULL,
-            18446744073709551557ULL,  18446744073709551615ULL
-        };
-        return static_cast<std::size_t>(
-            *std::lower_bound(
-                &list[0],
-                &list[std::extent<
-                    decltype(list)>::value],
-                (unsigned long long)n));
-    };
+        return std::lower_bound(
+            &object_impl::bucket_sizes()[0], 
+            &object_impl::bucket_sizes()[67],
+            static_cast<unsigned long long>(n)) - 
+                object_impl::bucket_sizes();
+     };
     BOOST_ASSERT(new_capacity > capacity());
     auto const f = std::ceil(
         new_capacity / max_load_factor());
     BOOST_ASSERT(
         f < static_cast<std::size_t>(-1));
-    auto const new_buckets = next_prime(
+    auto const prime_index = next_prime(
         static_cast<std::size_t>(f));
+    auto const new_buckets = 
+        object_impl::bucket_sizes()[prime_index];
     BOOST_ASSERT(std::ceil(
         new_buckets * max_load_factor()) >=
             new_capacity);
     new_capacity = static_cast<std::size_t>(
         std::ceil(new_buckets * max_load_factor()));
     if(new_capacity > max_size())
-        BOOST_THROW_EXCEPTION(
-            detail::object_too_large_exception());
+        object_too_large::raise();
     object_impl impl(
-        new_capacity, new_buckets, sp_);
+        new_capacity,
+        prime_index,
+        new_buckets,
+        impl_.salt(),
+        sp_);
     if(impl_.size() > 0)
         std::memcpy(
-            reinterpret_cast<void*>(impl.begin()),
-            reinterpret_cast<void const*>(impl_.begin()),
+            static_cast<void*>(impl.begin()),
+            static_cast<void const*>(impl_.begin()),
             impl_.size() * sizeof(value_type));
     impl.grow(impl_.size());
     impl_.shrink(impl_.size());
@@ -502,8 +539,8 @@ emplace_impl(
     f(&e);
     auto& head =
         impl_.bucket(result.second);
-    next(e) = head;
-    head = &e;
+    impl_.next(e) = head;
+    head = impl_.index_of(e);
     impl_.grow(1);
     return { &e, true };
 }
@@ -526,8 +563,8 @@ insert_impl(
     }
     auto& head =
         impl_.bucket(result.second);
-    next(e) = head;
-    head = &e;
+    impl_.next(e) = head;
+    head = impl_.index_of(e);
     impl_.grow(1);
     return { &e, true };
 }
@@ -544,8 +581,8 @@ insert_impl(
     f(&e);
     auto& head =
         impl_.bucket(hash);
-    next(e) = head;
-    head = &e;
+    impl_.next(e) = head;
+    head = impl_.index_of(e);
     impl_.grow(1);
     return &e;
 }
@@ -566,19 +603,19 @@ insert_range_impl(
             break;
         auto& head =
             impl_.bucket(e.key());
-        for(auto it = head;;
-            it = next(*it))
+        for(auto i = head;;
+            i = impl_.next(impl_.get(i)))
         {
-            if(it)
+            if(i != null_index)
             {
-                if(it->key() != e.key())
+                if(impl_.get(i).key() != e.key())
                     continue;
                 e.~value_type();
             }
             else
             {
-                next(e) = head;
-                head = &e;
+                impl_.next(e) = head;
+                head = impl_.index_of(e);
                 ++u.last;
             }
             break;

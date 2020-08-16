@@ -4,14 +4,13 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/vinniefalco/json
+// Official repository: https://github.com/cppalliance/json
 //
 
 #ifndef BOOST_JSON_DETAIL_IMPL_ARRAY_IMPL_IPP
 #define BOOST_JSON_DETAIL_IMPL_ARRAY_IMPL_IPP
 
 #include <boost/json/detail/array_impl.hpp>
-#include <boost/json/detail/except.hpp>
 
 namespace boost {
 namespace json {
@@ -23,8 +22,7 @@ array_impl(
     storage_ptr const& sp)
 {
     if(capacity > max_size())
-        BOOST_THROW_EXCEPTION(
-            array_too_large_exception());
+        array_too_large::raise();
     if(capacity > 0)
     {
         tab_ = ::new(sp->allocate(
@@ -33,7 +31,7 @@ array_impl(
              sizeof(table) + 1)
                 / sizeof(table)
                 * sizeof(table),
-            std::max(
+            (std::max)(
                 alignof(table),
                 alignof(value)))) table;
         tab_->capacity = static_cast<
@@ -88,7 +86,7 @@ destroy_impl(
             sizeof(table) + 1)
             / sizeof(table)
             * sizeof(table),
-        std::max(
+        (std::max)(
             alignof(table),
             alignof(value)));
 }
@@ -98,8 +96,10 @@ array_impl::
 destroy(
     storage_ptr const& sp) noexcept
 {
-    if(tab_ && sp->need_free())
-        destroy_impl(sp);
+    if(! tab_ ||
+        sp.is_not_counted_and_deallocate_is_null())
+        return;
+    destroy_impl(sp);
 }
 
 } // detail

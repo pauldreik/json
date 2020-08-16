@@ -1,17 +1,20 @@
 //
 // Copyright (c) 2019 Vinnie Falco (vinnie.falco@gmail.com)
+// Copyright (c) 2020 Krystian Stasiowski (sdkrystian@gmail.com)
 //
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/vinniefalco/json
+// Official repository: https://github.com/cppalliance/json
 //
 
 #ifndef BOOST_JSON_STRING_HPP
 #define BOOST_JSON_STRING_HPP
 
-#include <boost/json/config.hpp>
+#include <boost/json/detail/config.hpp>
 #include <boost/json/storage_ptr.hpp>
+#include <boost/json/string_view.hpp>
+#include <boost/json/detail/digest.hpp>
 #include <boost/json/detail/string_impl.hpp>
 #include <boost/pilfer.hpp>
 #include <algorithm>
@@ -36,7 +39,7 @@ class value;
     a string are stored contiguously. A pointer to any
     character in a string may be passed to functions
     that expect a pointer to the first element of a
-    null-terminated `char[]` array.
+    null-terminated `char` array.
 
     String iterators are regular `char` pointers.
 
@@ -84,7 +87,7 @@ public:
     /// A random access iterator to an element
     using iterator          = char*;
 
-    /// A random access const iterator  to an element
+    /// A random access const iterator to an element
     using const_iterator    = char const*;
 
     /// A reverse random access iterator to an element
@@ -126,6 +129,8 @@ public:
         impl_.destroy(sp_);
     }
 
+    //------------------------------------------------------
+
     //
     // Construction
     //
@@ -133,15 +138,11 @@ public:
     /** Default constructor.
 
         The string will have a zero size and a non-zero,
-        unspecified capacity, using the default storage.
+        unspecified capacity, using the default memory resource.
 
         @par Complexity
 
         Constant.
-
-        @par Exception Safety
-
-        No-throw guarantee.
     */
     string() = default;
 
@@ -149,24 +150,20 @@ public:
 
         Constructs the string with the contents of `other`
         using pilfer semantics.
-        Ownership of the @ref storage is transferred.
+        Ownership of the @ref memory_resource is transferred.
 
+        @par Complexity
+
+        Constant.
+        
         @note
 
         After construction, the pilfered-from string may
         only be destroyed.
         
-        @par Complexity
-
-        Constant.
-
-        @par Exception Safety
-
-        No-throw guarantee.
-
         @param other The string to pilfer
 
-        @see
+        @see @ref pilfer
         
         Pilfering constructors are described in
         <a href="http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0308r0.html">Valueless Variants Considered Harmful</a>, by Peter Dimov.
@@ -180,20 +177,17 @@ public:
 
     /** Constructor.
 
-        The string will have a zero size and a non-zero,
-        unspecified capacity, using the specified storage.
+        The string will have zero size and a non-zero,
+        unspecified capacity, obtained from the specified
+        memory resource.
 
         @par Complexity
 
         Constant.
 
-        @par Exception Safety
-
-        No-throw guarantee.
-
-        @param sp A pointer to the @ref storage
+        @param sp A pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
+        ownership of the memory resource.
     */
     explicit
     string(storage_ptr sp)
@@ -213,21 +207,24 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+
+        @note
+
+        Calls to `memory_resource::allocate` may throw.
 
         @param count The size of the resulting string.
 
-        @param ch THe value to initialize characters
+        @param ch The value to initialize characters
         of the string with.
 
-        @param sp An optional pointer to the @ref storage
+        @param sp An optional pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
-        If this parameter is omitted, the default storage
-        is used.
+        ownership of the memory resource.
+        The default argument for this parameter is `{}`.
 
         @throw std::length_error `count > max_size()`.
     */
+    explicit
     string(
         std::size_t count,
         char ch,
@@ -235,49 +232,6 @@ public:
         : sp_(std::move(sp))
     {
         assign(count, ch);
-    }
-
-    /** Constructor.
-
-        Construct the contents with a copy of the
-        substring `{pos, pos+count)` of `other`. If
-        the requested substring lasts past the
-        end of the string, or if `count == npos`,
-        the resulting substring is `{pos, other.size())`.
-
-        @par Complexity
-
-        Linear in `count`.
-
-        @par Exception Safety
-
-        Strong guarantee.
-        Calls to @ref storage::allocate may throw.
-
-        @param other The string to use as a source
-        to copy from.
-
-        @param pos The starting character position to
-        copy from.
-
-        @param count The number of characters to copy.
-
-        @param sp An optional pointer to the @ref storage
-        to use. The container will acquire shared
-        ownership of the storage object.
-        If this parameter is omitted, the default storage
-        is used.
-
-        @throw std::out_of_range `pos >= other.size()`.
-    */
-    string(
-        string const& other,
-        std::size_t pos,
-        std::size_t count = npos,
-        storage_ptr sp = {})
-        : sp_(std::move(sp))
-    {
-        assign(other, pos, count);
     }
 
     /** Constructor.
@@ -294,16 +248,18 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+
+        @note
+
+        Calls to `memory_resource::allocate` may throw.
 
         @param s A pointer to a character string used to
         copy from.
 
-        @param sp An optional pointer to the @ref storage
+        @param sp An optional pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
-        If this parameter is omitted, the default storage
-        is used.
+        ownership of the memory resource.
+        The default argument for this parameter is `{}`.
 
         @throw std::length_error `strlen(s) > max_size()`.
     */
@@ -317,9 +273,9 @@ public:
 
     /** Constructor.
 
-        Construct the contents with copies of the characters
-        in the range `{s, s+count)`. This range can contain
-        null characters.
+        Construct the contents with copies of the
+        characters in the range `{s, s+count)`.
+        This range can contain null characters.
 
         @par Complexity
 
@@ -328,21 +284,24 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+
+        @note
+
+        Calls to `memory_resource::allocate` may throw.
 
         @param count The number of characters to copy.
 
         @param s A pointer to a character string used to
         copy from.
 
-        @param sp An optional pointer to the @ref storage
+        @param sp An optional pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
-        If this parameter is omitted, the default storage
-        is used.
+        ownership of the memory resource.
+        The default argument for this parameter is `{}`.
 
         @throw std::length_error `count > max_size()`.
     */
+    explicit
     string(
         char const* s,
         std::size_t count,
@@ -357,10 +316,6 @@ public:
         Construct the contents with copies of characters
         in the range `{first, last)`.
 
-        @par Constraints
-
-        `InputIt` satisfies __InputIterator__.
-
         @par Complexity
 
         Linear in `std::distance(first, last)`.
@@ -368,7 +323,16 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+
+        @note
+
+        Calls to `memory_resource::allocate` may throw.
+
+        @tparam InputIt The type of the iterators.
+
+        @par Constraints
+
+        `InputIt` satisfies __InputIterator__.
 
         @param first An input iterator pointing to the
         first character to insert, or pointing to the
@@ -377,19 +341,19 @@ public:
         @param last An input iterator pointing to the end
         of the range.
 
-        @param sp An optional pointer to the @ref storage
+        @param sp An optional pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
-        If this parameter is omitted, the default storage
-        is used.
+        ownership of the memory resource.
+        The default argument for this parameter is `{}`.
 
         @throw std::length_error `std::distance(first, last) > max_size()`.
     */
     template<class InputIt
-    #ifndef GENERATING_DOCUMENTATION
+    #ifndef BOOST_JSON_DOCS
         ,class = is_inputit<InputIt>
     #endif
     >
+    explicit
     string(
         InputIt first,
         InputIt last,
@@ -406,7 +370,10 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+
+        @note
+
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The string to use as a source
         to copy from.
@@ -428,17 +395,20 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+
+        @note
+
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The string to use as a source
         to copy from.
 
-        @param sp An optional pointer to the @ref storage
+        @param sp An optional pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
-        If this parameter is omitted, the default storage
-        is used.
+        ownership of the memory resource.
+        The default argument for this parameter is `{}`.
     */
+    explicit
     string(
         string const& other,
         storage_ptr sp)
@@ -453,20 +423,13 @@ public:
         using move semantics. Ownership of the underlying
         memory is transferred.
         The container acquires shared ownership of the
-        @ref storage used by `other`.
-
-        @note
-
-        After construction, the moved-from string behaves as
-        if newly constructed with its current storage pointer.
+        @ref memory_resource used by `other`. After construction, 
+        the moved-from string behaves as if newly
+        constructed with its current memory resource.
         
         @par Complexity
 
         Constant.
-
-        @par Exception Safety
-
-        No-throw guarantee.
 
         @param other The string to move
     */
@@ -484,13 +447,14 @@ public:
 
         @li If `*other.storage() == *sp`,
         ownership of the underlying memory is transferred
-        in constant time, with no possibility of exceptions.
-        After construction, the moved-from string behaves
-        as if newly constructed with its current @ref storage.
+        in constant time, with no possibility
+        of exceptions. After construction, the moved-from
+        string behaves as if newly constructed with
+        its current @ref memory_resource. Otherwise,
 
-        @li if `*other.storage() != *sp`,
-        a copy of the characters in `other` is made. In this
-        case, the moved-from container is not changed.
+        @li If `*other.storage() != *sp`,
+        a copy of the characters in `other` is made. In
+        this case, the moved-from container is not changed.
 
         @par Complexity
 
@@ -499,16 +463,19 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+
+        @note
+
+        Calls to `memory_resource::allocate` may throw.
 
         @param other The string to assign from.
 
-        @param sp An optional pointer to the @ref storage
+        @param sp An optional pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
-        If this parameter is omitted, the default storage
-        is used.
+        ownership of the memory resource.
+        The default argument for this parameter is `{}`.
     */
+    explicit
     string(
         string&& other,
         storage_ptr sp)
@@ -518,39 +485,7 @@ public:
     }
 
     /** Constructor.
-
-        Construct the contents with those of the
-        initializer list `init`.
-
-        @par Complexity
-
-        Linear in `init.size()`.
-
-        @par Exception Safety
-
-        Strong guarantee.
-        Calls to @ref storage::allocate may throw.
-
-        @param init The initializer list to copy from.
-
-        @param sp An optional pointer to the @ref storage
-        to use. The container will acquire shared
-        ownership of the storage object.
-        If this parameter is omitted, the default storage
-        is used.
-
-        @throw std::length_error `init.size() > max_size()`.
-    */
-    string(
-        std::initializer_list<char> init,
-        storage_ptr sp = {})
-        : sp_(std::move(sp))
-    {
-        assign(init);
-    }
-
-    /** Constructor.
-
+    
         Construct the contents with those of a
         string view. This view can contain
         null characters.
@@ -562,15 +497,17 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+
+        @note
+
+        Calls to `memory_resource::allocate` may throw.
 
         @param s The string view to copy from.
 
-        @param sp An optional pointer to the @ref storage
+        @param sp An optional pointer to the @ref memory_resource
         to use. The container will acquire shared
-        ownership of the storage object.
-        If this parameter is omitted, the default storage
-        is used.
+        ownership of the memory resource.
+        The default argument for this parameter is `{}`.
 
         @throw std::length_error `s.size() > max_size()`.
     */
@@ -580,51 +517,6 @@ public:
         : sp_(std::move(sp))
     {
         assign(s);
-    }
-
-    /** Constructor.
-
-        Constructs the contents with the characters
-        from the substring `{pos, pos+count)` of `s`.
-        If `count == npos`, if `count` is not specified,
-        or if the requested substring lasts past the end
-        of the string, the resulting substring is `{pos, s.size())`.
-        The substring can contain null characters.
-
-        @par Complexity
-
-        Linear in `count`.
-
-        @par Exception Safety
-
-        Strong guarantee.
-        Calls to @ref storage::allocate may throw.
-
-        @param s The string view to copy from.
-
-        @param pos The starting character position to
-        copy from.
-
-        @param count The number of characters to copy.
-
-        @param sp An optional pointer to the @ref storage
-        to use. The container will acquire shared
-        ownership of the storage object.
-        If this parameter is omitted, the default storage
-        is used.
-
-        @throw std::out_of_range `pos >= s.size()`
-
-        @throw std::length_error `count > max_size()`.
-    */
-    string(
-        string_view s,
-        std::size_t pos,
-        std::size_t count,
-        storage_ptr sp = {})
-        : sp_(std::move(sp))
-    {
-        assign(s.substr(pos, count));
     }
 
     //------------------------------------------------------
@@ -644,7 +536,12 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+
+        @note
+
+        Calls to `memory_resource::allocate` may throw.
+
+        @return `*this`
 
         @param other The string to use as a source
         to copy from.
@@ -662,13 +559,14 @@ public:
 
         @li If `*other.storage() == *this->storage()`,
         ownership of the underlying memory is transferred
-        in constant time, with no possibility of exceptions.
-        After construction, the moved-from string behaves
-        as if newly constructed with its current @ref storage.
+        in constant time, with no possibility
+        of exceptions. After construction, the moved-from
+        string behaves as if newly constructed with its
+        current @ref memory_resource. Otherwise,
 
-        @li if `*other.storage() != *this->storage()`,
-        a copy of the characters in `other` is made. In this
-        case, the moved-from container is not changed.
+        @li If `*other.storage() != *this->storage()`,
+        a copy of the characters in `other` is made. In
+        this case, the moved-from container is not changed.
 
         @par Complexity
 
@@ -677,7 +575,15 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+
+        @note
+
+        Calls to `memory_resource::allocate` may throw.
+
+        @return `*this`
+
+        @param other The string to use as a source
+        to move from.
     */
     string&
     operator=(string&& other)
@@ -694,46 +600,26 @@ public:
 
         @par Complexity
 
-        Linear in `strlen(s)`.
+        Linear in `std::strlen(s)`.
 
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
 
-        @param s A pointer to a character string used to
-        copy from.
+        @note
 
-        @throw std::length_error `strlen(s) > max_size()`.
+        Calls to `memory_resource::allocate` may throw.
+
+        @return `*this`
+
+        @param s The null-terminated character string.
+
+        @throw std::length_error `std::strlen(s) > max_size()`.
     */
     string&
     operator=(char const* s)
     {
         return assign(s);
-    }
-
-    /** Assign a value to the string.
-
-        Replaces the contents with those of the
-        initializer list `init`.
-
-        @par Complexity
-
-        Linear in `init.size()`.
-
-        @par Exception Safety
-
-        Strong guarantee.
-        Calls to @ref storage::allocate may throw.
-
-        @param init The initializer list to copy from.
-
-        @throw std::length_error `init.size() > max_size()`.
-    */
-    string&
-    operator=(std::initializer_list<char> init)
-    {
-        return assign(init);
     }
 
     /** Assign a value to the string.
@@ -749,7 +635,12 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+
+        @note
+
+        Calls to `memory_resource::allocate` may throw.
+
+        @return `*this`
 
         @param s The string view to copy from.
 
@@ -775,11 +666,16 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+
+        @note
+
+        Calls to `memory_resource::allocate` may throw.
+
+        @return `*this`
 
         @param count The size of the resulting string.
 
-        @param ch THe value to initialize characters
+        @param ch The value to initialize characters
         of the string with.
 
         @throw std::length_error `count > max_size()`.
@@ -801,7 +697,12 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+
+        @note
+
+        Calls to `memory_resource::allocate` may throw.
+
+        @return `*this`
 
         @param other The string to use as a source
         to copy from.
@@ -813,55 +714,20 @@ public:
 
     /** Assign characters to a string.
 
-        Replace the contents with a copy of the
-        substring `{pos, pos+count)` of `other`. If
-        the requested substring lasts past the
-        end of the string, or if `count == npos`,
-        the resulting substring is `{pos, other.size())`.
-
-        @par Complexity
-
-        Linear in `count`.
-
-        @par Exception Safety
-
-        Strong guarantee.
-        Calls to @ref storage::allocate may throw.
-
-        @param other The string to use as a source
-        to copy from.
-
-        @param pos The starting character position to
-        copy from.
-
-        @param count The number of characters to copy.
-
-        @throw std::out_of_range `pos >= other.size()`.
-    */
-    string&
-    assign(
-        string const& other,
-        std::size_t pos,
-        std::size_t count)
-    {
-        return assign(
-            other.substr(pos, count));
-    }
-
-    /** Assign characters to a string.
-
         Replace the contents with those of `other`
         using move semantics.
 
         @li If `*other.storage() == *this->storage()`,
         ownership of the underlying memory is transferred
-        in constant time, with no possibility of exceptions.
-        After construction, the moved-from string behaves
-        as if newly constructed with its current @ref storage.
+        in constant time, with no possibility of
+        exceptions. After construction, the moved-from
+        string behaves as if newly constructed with
+        its current  @ref memory_resource, otherwise
 
-        @li if `*other.storage() != *this->storage()`,
-        a copy of the characters in `other` is made. In this
-        case, the moved-from container is not changed.
+        @li If `*other.storage() != *this->storage()`,
+        a copy of the characters in `other` is made.
+        In this case, the moved-from container
+        is not changed.
 
         @par Complexity
 
@@ -870,7 +736,12 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+
+        @note
+
+        Calls to `memory_resource::allocate` may throw.
+
+        @return `*this`
 
         @param other The string to assign from.
     */
@@ -880,9 +751,9 @@ public:
 
     /** Assign characters to a string.
 
-        Replaces the contents with copies of the characters
-        in the range `{s, s+count)`. This range can contain
-        null characters.
+        Replaces the contents with copies of the
+        characters in the range `{s, s+count)`. This
+        range can contain null characters.
 
         @par Complexity
 
@@ -891,7 +762,12 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+
+        @note
+
+        Calls to `memory_resource::allocate` may throw.
+
+        @return `*this`
 
         @param count The number of characters to copy.
 
@@ -920,7 +796,12 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+
+        @note
+
+        Calls to `memory_resource::allocate` may throw.
+
+        @return `*this`
 
         @param s A pointer to a character string used to
         copy from.
@@ -940,10 +821,6 @@ public:
         Replaces the contents with copies of characters
         in the range `{first, last)`.
 
-        @par Constraints
-
-        `InputIt` satisfies __InputIterator__.
-
         @par Complexity
 
         Linear in `std::distance(first, last)`.
@@ -951,7 +828,18 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+
+        @note
+
+        Calls to `memory_resource::allocate` may throw.
+
+        @tparam InputIt The type of the iterators.
+
+        @par Constraints
+
+        `InputIt` satisfies __InputIterator__.
+
+        @return `*this`
 
         @param first An input iterator pointing to the
         first character to insert, or pointing to the
@@ -963,7 +851,7 @@ public:
         @throw std::length_error `std::distance(first, last) > max_size()`.
     */
     template<class InputIt
-    #ifndef GENERATING_DOCUMENTATION
+    #ifndef BOOST_JSON_DOCS
         ,class = is_inputit<InputIt>
     #endif
     >
@@ -971,30 +859,6 @@ public:
     assign(
         InputIt first,
         InputIt last);
-
-    /** Assign characters to a string.
-
-        Replaces the contents with those of the
-        initializer list `init`.
-
-        @par Complexity
-
-        Linear in `init.size()`.
-
-        @par Exception Safety
-
-        Strong guarantee.
-        Calls to @ref storage::allocate may throw.
-
-        @param init The initializer list to copy from.
-
-        @throw std::length_error `init.size() > max_size()`.
-    */
-    string&
-    assign(std::initializer_list<char> init)
-    {
-        return assign(init.begin(), init.size());
-    }
 
     /** Assign characters to a string.
 
@@ -1009,7 +873,12 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+
+        @note
+
+        Calls to `memory_resource::allocate` may throw.
+
+        @return `*this`
 
         @param s The string view to copy from.
 
@@ -1021,50 +890,18 @@ public:
         return assign(s.data(), s.size());
     }
 
-    /** Assign characters to a string.
-
-        Replaces the contents with the characters
-        from the substring `{pos, pos+count)` of `s`.
-        If `count == npos`, if `count` is not specified,
-        or if the requested substring lasts past the end
-        of the string, the resulting substring is `{pos, s.size())`.
-        The substring can contain null characters.
-
-        @par Complexity
-
-        Linear in `count`.
-
-        @par Exception Safety
-
-        Strong guarantee.
-        Calls to @ref storage::allocate may throw.
-
-        @param s The string view to copy from.
-
-        @param pos The starting character position to
-        copy from.
-
-        @param count The number of characters to copy.
-
-        @throw std::out_of_range `pos >= s.size()`
-
-        @throw std::length_error `count > max_size()`.
-    */
-    string&
-    assign(
-        string_view s,
-        std::size_t pos,
-        std::size_t count = npos)
-    {
-        return assign(s.substr(pos, count));
-    }
-
     //------------------------------------------------------
 
-    /** Return a pointer to the storage associated with the container
+    /** Return the memory resource associated with the container.
 
-        Shared ownership of the @ref storage is propagated by
-        the container to all of its children recursively.
+        Returns a pointer to the memory resource associated
+        with the container.
+
+        @note 
+        
+        Shared ownership of the @ref memory_resource is
+        propagated by the container to all of its
+        children recursively.
 
         @par Complexity
 
@@ -1082,18 +919,20 @@ public:
     //
     //------------------------------------------------------
 
-    /** Access a character, with bounds checking
+    /** Return a character with bounds checking.
 
         Returns a reference to the character specified at
-        location `pos`, with bounds checking. If pos is not
-        within the range of the container, an exception of
-        type `std::out_of_range` is thrown.
+        location `pos`.
 
         @par Complexity
 
         Constant.
 
-        @param pos A zero-based index
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @param pos A zero-based index to access.
 
         @throw std::out_of_range `pos >= size()`
     */
@@ -1107,18 +946,20 @@ public:
         return impl_.data()[pos];
     }
 
-    /** Access a character, with bounds checking
+    /** Return a character with bounds checking.
 
         Returns a reference to the character specified at
-        location `pos`, with bounds checking. If pos is not
-        within the range of the container, an exception of
-        type `std::out_of_range` is thrown.
+        location `pos`.
 
         @par Complexity
 
         Constant.
 
-        @param pos A zero-based index
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @param pos A zero-based index to access.
 
         @throw std::out_of_range `pos >= size()`
     */
@@ -1132,20 +973,22 @@ public:
         return impl_.data()[pos];
     }
 
-    /** Access a character
+    /** Return a character without bounds checking.
 
         Returns a reference to the character specified at
-        location `pos`. No bounds checking is performed.
-
-        @par Precondition
-        
-        `pos >= size`
+        location `pos`.
 
         @par Complexity
 
         Constant.
 
-        @param pos A zero-based index
+        @par Precondition
+        
+        @code
+        pos >= size
+        @endcode
+
+        @param pos A zero-based index to access.
     */
     char&
     operator[](std::size_t pos)
@@ -1153,20 +996,22 @@ public:
         return impl_.data()[pos];
     }
 
-    /** Access a character
+   /**  Return a character without bounds checking.
 
-        Returns a reference to the element specified at
-        location `pos`. No bounds checking is performed.
-
-        @par Precondition
-
-        `pos >= size`
+        Returns a reference to the character specified at
+        location `pos`.
 
         @par Complexity
 
         Constant.
 
-        @param pos A zero-based index
+        @par Precondition
+
+        @code
+        pos >= size
+        @endcode
+
+        @param pos A zero-based index to access.
     */
     const char&
     operator[](std::size_t pos) const
@@ -1174,17 +1019,19 @@ public:
         return impl_.data()[pos];
     }
 
-    /** Access the first character
+    /** Return the first character.
 
         Returns a reference to the first character.
-
-        @par Precondition
-
-        `not empty()`
 
         @par Complexity
 
         Constant.
+
+        @par Precondition
+
+        @code
+        not empty()
+        @endcode
     */
     char&
     front()
@@ -1192,17 +1039,19 @@ public:
         return impl_.data()[0];
     }
 
-    /** Access the first character
+    /** Return the first character.
 
         Returns a reference to the first character.
-
-        @par Precondition
-
-        `not empty()`
 
         @par Complexity
 
         Constant.
+
+        @par Precondition
+
+        @code
+        not empty()
+        @endcode
     */
     char const&
     front() const
@@ -1210,17 +1059,19 @@ public:
         return impl_.data()[0];
     }
 
-    /** Access the last character
+    /** Return the last character.
 
         Returns a reference to the last character.
-
-        @par Precondition
-
-        `not empty()`
 
         @par Complexity
 
         Constant.
+
+        @par Precondition
+
+        @code
+        not empty()
+        @endcode
     */
     char&
     back()
@@ -1228,17 +1079,19 @@ public:
         return impl_.data()[impl_.size() - 1];
     }
 
-    /** Access the last character
+    /** Return the last character.
 
         Returns a reference to the last character.
-
-        @par Precondition
-
-        `not empty()`
 
         @par Complexity
 
         Constant.
+
+        @par Precondition
+
+        @code
+        not empty()
+        @endcode
     */
     char const&
     back() const
@@ -1246,7 +1099,7 @@ public:
         return impl_.data()[impl_.size() - 1];
     }
 
-    /** Access the underlying character array directly
+    /** Return the underlying character array directly.
 
         Returns a pointer to the underlying array
         serving as storage. The value returned is such that
@@ -1257,8 +1110,7 @@ public:
 
         Constant.
 
-        @return A pointer to the string. The string is
-        always null terminated. The value returned from
+        @note The value returned from
         this function is never equal to `nullptr`.
     */
     char*
@@ -1267,20 +1119,20 @@ public:
         return impl_.data();
     }
 
-    /** Access the underlying character array directly
+    /** Return the underlying character array directly.
 
         Returns a pointer to the underlying array
-        serving as storage. The value returned is such that
-        the range `{data(), data()+size())` is always a
-        valid range, even if the container is empty.
+        serving as storage. 
+        
+        @note The value returned is such that
+        the range `{data(), data() + size())` is always a
+        valid range, even if the container is empty. 
+        The value returned from
+        this function is never equal to `nullptr`.
 
         @par Complexity
 
         Constant.
-
-        @return A pointer to the string. The string is
-        always null terminated. The value returned from
-        this function is never equal to `nullptr`.
     */
     char const*
     data() const noexcept
@@ -1288,19 +1140,18 @@ public:
         return impl_.data();
     }
 
-    /** Access the underlying character array directly
+    /** Return the underlying character array directly.
 
         Returns a pointer to the underlying array
         serving as storage. The value returned is such that
-        the range `{data(), data()+size())` is always a
+        the range `{c_str(), c_str() + size()}` is always a
         valid range, even if the container is empty.
 
         @par Complexity
 
         Constant.
 
-        @return A pointer to the string. The string is
-        always null terminated. The value returned from
+        @note The value returned from
         this function is never equal to `nullptr`.
     */
     char const*
@@ -1309,12 +1160,11 @@ public:
         return impl_.data();
     }
 
-    /** Return a reference to the string as a string view.
+    /** Convert to a `string_view` referring to the string.
 
-        This function returns a string view to the
-        underlying character string. While the string is
-        always null terminated, the size of the view does
-        not include the null character.
+        Returns a string view to the
+        underlying character string. The size of the view
+        does not include the null terminator.
 
         @par Complexity
 
@@ -1331,7 +1181,7 @@ public:
     //
     //------------------------------------------------------
 
-    /** Return an iterator to the first character
+    /** Return an iterator to the beginning.
 
         If the container is empty, the returned iterator
         will be equal to @ref end().
@@ -1346,7 +1196,7 @@ public:
         return impl_.data();
     }
 
-    /** Return an iterator to the first character
+    /** Return an iterator to the beginning.
 
         If the container is empty, the returned iterator
         will be equal to @ref end().
@@ -1361,7 +1211,7 @@ public:
         return impl_.data();
     }
 
-    /** Return an iterator to the first character
+    /** Return an iterator to the beginning.
 
         If the container is empty, the returned iterator
         will be equal to @ref end().
@@ -1376,10 +1226,18 @@ public:
         return impl_.data();
     }
 
-    /** Return an iterator to the character following the last character
+    /** Return an iterator to the end.
 
-        The character acts as a placeholder; attempting to
-        access it results in undefined behavior.
+        Returns an iterator to the character following
+        the last character of the string.
+        If the container is empty, the returned iterator
+        will be equal to @ref begin().
+
+        @note
+
+        The pointed-to character acts as a placeholder;
+        attempting to access it results in undefined
+        behavior.
 
         @par Complexity
 
@@ -1391,10 +1249,18 @@ public:
         return impl_.end();
     }
 
-    /** Return an iterator to the character following the last character
+    /** Return an iterator to the end.
 
-        The character acts as a placeholder; attempting to
-        access it results in undefined behavior.
+        Returns an iterator to the character following
+        the last character of the string.
+        If the container is empty, the returned iterator
+        will be equal to @ref begin().
+
+        @note
+
+        The pointed-to character acts as a placeholder;
+        attempting to access it results in undefined
+        behavior.
 
         @par Complexity
 
@@ -1406,10 +1272,18 @@ public:
         return impl_.end();
     }
 
-    /** Return an iterator to the character following the last character
+    /** Return an iterator to the end.
 
-        The character acts as a placeholder; attempting to
-        access it results in undefined behavior.
+        Returns an iterator to the character following
+        the last character of the string.
+        If the container is empty, the returned iterator
+        will be equal to @ref begin().
+
+        @note
+
+        The pointed-to character acts as a placeholder;
+        attempting to access it results in undefined
+        behavior.
 
         @par Complexity
 
@@ -1421,15 +1295,18 @@ public:
         return impl_.end();
     }
 
-    /** Return a reverse iterator to the first character of the reversed container
+    /** Return a reverse iterator to the first character of the reversed container.
 
-        The pointed-to character corresponds to the last character
-        of the non-reversed container. If the container is empty,
-        the returned iterator is equal to @ref rend()
-
+        Returns the pointed-to character that
+        corresponds to the last character of the
+        non-reversed container.
+        
         @par Complexity
 
         Constant.
+
+        @note If the container is empty,
+        the returned iterator is equal to @ref rend()
     */
     reverse_iterator
     rbegin() noexcept
@@ -1437,15 +1314,18 @@ public:
         return reverse_iterator(impl_.end());
     }
 
-    /** Return a reverse iterator to the first character of the reversed container
+    /** Return a reverse iterator to the first character of the reversed container.
 
-        The pointed-to character corresponds to the last character
-        of the non-reversed container. If the container is empty,
-        the returned iterator is equal to @ref rend()
-
+        Returns the pointed-to character that
+        corresponds to the last character of the
+        non-reversed container.
+        
         @par Complexity
 
         Constant.
+
+        @note If the container is empty,
+        the returned iterator is equal to @ref rend()
     */
     const_reverse_iterator
     rbegin() const noexcept
@@ -1453,15 +1333,18 @@ public:
         return const_reverse_iterator(impl_.end());
     }
 
-    /** Return a reverse iterator to the first character of the reversed container
+    /** Return a reverse iterator to the first character of the reversed container.
 
-        The pointed-to character corresponds to the last character
-        of the non-reversed container. If the container is empty,
-        the returned iterator is equal to @ref rend()
-
+        Returns the pointed-to character that
+        corresponds to the last character of the
+        non-reversed container.
+        
         @par Complexity
 
         Constant.
+
+        @note If the container is empty,
+        the returned iterator is equal to @ref rend()
     */
     const_reverse_iterator
     crbegin() const noexcept
@@ -1469,16 +1352,19 @@ public:
         return const_reverse_iterator(impl_.end());
     }
 
-    /** Return a reverse iterator to the character following the last character of the reversed container
+    /** Return a reverse iterator to the character following the last character of the reversed container.
 
-        The pointed-to character corresponds to the character
-        preceding the first character of the non-reversed container.
-        This character acts as a placeholder, attempting to access
-        it results in undefined behavior.
-
+        Returns the pointed-to character that corresponds
+        to the character preceding the first character of
+        the non-reversed container. 
+        
         @par Complexity
 
         Constant.
+
+        @note This character acts as a placeholder,
+        attempting to access it results in undefined
+        behavior.
     */
     reverse_iterator
     rend() noexcept
@@ -1486,16 +1372,19 @@ public:
         return reverse_iterator(begin());
     }
 
-    /** Return a reverse iterator to the character following the last character of the reversed container
+    /** Return a reverse iterator to the character following the last character of the reversed container.
 
-        The pointed-to character corresponds to the character
-        preceding the first character of the non-reversed container.
-        This character acts as a placeholder, attempting to access
-        it results in undefined behavior.
+        Returns the pointed-to character that corresponds
+        to the character preceding the first character of
+        the non-reversed container. 
 
         @par Complexity
 
         Constant.
+
+        @note This character acts as a placeholder,
+        attempting to access it results in undefined
+        behavior.
     */
     const_reverse_iterator
     rend() const noexcept
@@ -1503,16 +1392,19 @@ public:
         return const_reverse_iterator(begin());
     }
 
-    /** Return a reverse iterator to the character following the last character of the reversed container
+    /** Return a reverse iterator to the character following the last character of the reversed container.
 
-        The pointed-to character corresponds to the character
-        preceding the first character of the non-reversed container.
-        This character acts as a placeholder, attempting to access
-        it results in undefined behavior.
-
+        Returns the pointed-to character that corresponds
+        to the character preceding the first character of
+        the non-reversed container. 
+        
         @par Complexity
 
         Constant.
+
+        @note This character acts as a placeholder,
+        attempting to access it results
+        in undefined behavior.
     */
     const_reverse_iterator
     crend() const noexcept
@@ -1556,7 +1448,7 @@ public:
         return impl_.size();
     }
 
-    /** Return the maximum number of characters the string can hold
+    /** Return the maximum number of characters the string can hold.
 
         The maximum is an implementation-defined number.
         This value is a theoretical limit; at runtime,
@@ -1578,8 +1470,7 @@ public:
     /** Return the number of characters that can be held without a reallocation.
 
         This number represents the largest number of
-        characters that may be currently held without
-        reallocating the existing storage.
+        characters the currently allocated storage can contain.
         This number may be larger than the value returned
         by @ref size().
 
@@ -1593,21 +1484,14 @@ public:
         return impl_.capacity();
     }
 
-    /** Increase the capacity to at least a certain amount
+    /** Increase the capacity to at least a certain amount.
 
         This increases the capacity of the array to a value
         that is greater than or equal to `new_capacity`. If
-        `new_capacity > capacity()`, new memory is allocated.
-        Otherwise, the call has no effect. The number of
-        elements and therefore the @ref size() of the container
-        is not changed.
-
-        @note
-
-        If new memory is allocated, all iterators including any
-        past-the-end iterators, and all references to the
-        elements are invalidated. Otherwise, no iterators or
-        references are invalidated.
+        `new_capacity > capacity()`, new memory is
+        allocated. Otherwise, the call has no effect.
+        The number of elements and therefore the
+        @ref size() of the container is not changed.
 
         @par Complexity
 
@@ -1616,7 +1500,17 @@ public:
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
+
+        @note
+
+        If new memory is allocated, all iterators including
+        any past-the-end iterators, and all references to
+        the elements are invalidated. Otherwise, no
+        iterators or references are invalidated.
+
+        @note
+
+        Calls to `memory_resource::allocate` may throw.
 
         @param new_capacity The new capacity of the array.
 
@@ -1630,23 +1524,21 @@ public:
         reserve_impl(new_capacity);
     }
 
-    /** Request the removal of unused capacity
+    /** Request the removal of unused capacity.
 
         This performs a non-binding request to reduce
         @ref capacity() to @ref size(). The request may
-        or may not be fulfilled. If reallocation occurs,
-        all iterators including any past-the-end iterators,
-        and all references to characters are invalidated.
-        Otherwise, no iterators or references are
-        invalidated.
-
+        or may not be fulfilled. 
+        
         @par Complexity
 
         At most, linear in @ref size().
 
-        @par Exception Safety
-
-        No-throw guarantee.
+        @note If reallocation occurs, all iterators
+        including  any past-the-end iterators, and all
+        references to characters are invalidated.
+        Otherwise, no iterators or references are
+        invalidated.
     */
     BOOST_JSON_DECL
     void
@@ -1658,17 +1550,19 @@ public:
     //
     //------------------------------------------------------
 
-    /** Clear the contents
+    /** Clear the contents.
 
         Erases all characters from the string. After this
         call, @ref size() returns zero but @ref capacity()
-        is unchanged. All references, pointers, or iterators
-        referring to contained elements are invalidated. Any
-        past-the-end iterators are also invalidated.
-
+        is unchanged. 
+        
         @par Complexity
 
         Linear in @ref size().
+
+        @note All references, pointers, or iterators
+        referring to contained elements are invalidated.
+        Any past-the-end iterators are also invalidated.
     */
     BOOST_JSON_DECL
     void
@@ -1676,6 +1570,58 @@ public:
 
     //------------------------------------------------------
 
+    /** Insert a string.
+
+        Inserts the `string_view` `sv` at the position `pos`.
+
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @note All references, pointers, or iterators
+        referring to contained elements are invalidated.
+        Any past-the-end iterators are also invalidated.
+
+        @return `*this`
+
+        @param pos The index to insert at.
+
+        @param sv The `string_view` to insert.
+
+        @throw std::length_error `size() + s.size() > max_size()`
+
+        @throw std::out_of_range `pos > size()`
+    */
+    BOOST_JSON_DECL
+    string&
+    insert(
+        std::size_t pos,
+        string_view sv);
+
+    /** Insert a character.
+        
+        Inserts `count` copies of `ch` at the position `pos`.
+
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @note All references, pointers, or iterators
+        referring to contained elements are invalidated.
+        Any past-the-end iterators are also invalidated.
+
+        @return `*this`
+
+        @param pos The index to insert at.
+
+        @param count The number of characters to insert.
+
+        @param ch The character to insert.
+
+        @throw std::length_error `size() + count > max_size()`
+
+        @throw std::out_of_range `pos > size()`
+    */
     BOOST_JSON_DECL
     string&
     insert(
@@ -1683,114 +1629,174 @@ public:
         std::size_t count,
         char ch);
 
+    /** Insert a character.
+
+        Inserts the character `ch` before the character
+        at index `pos`.
+
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @note All references, pointers, or iterators
+        referring to contained elements are invalidated.
+        Any past-the-end iterators are also invalidated.
+
+        @return `*this`
+
+        @param pos The index to insert at.
+
+        @param ch The character to insert.
+
+        @throw std::length_error `size() + 1 > max_size()`
+
+        @throw std::out_of_range `pos > size()`
+    */
     string&
     insert(
-        std::size_t pos,
-        char const* s)
-    {
-        return insert(pos, s,
-            traits_type::length(s));
-    }
-
-    BOOST_JSON_DECL
-    string&
-    insert(
-        std::size_t pos,
-        char const* s,
-        std::size_t count);
-
-    string&
-    insert(
-        std::size_t pos,
-        string const& s)
-    {
-        return insert(pos, s.data(), s.size());
-    }
-
-    string&
-    insert(
-        std::size_t pos,
-        string const& s,
-        std::size_t pos_str,
-        std::size_t count = npos)
-    {
-        return insert(pos, s.substr(pos_str, count));
-    }
-
-    iterator
-    insert(
-        const_iterator pos,
+        size_type pos,
         char ch)
     {
         return insert(pos, 1, ch);
     }
 
-    BOOST_JSON_DECL
-    iterator
-    insert(
-        const_iterator pos,
-        std::size_t count,
-        char ch);
+    /** Insert a range of characters.
 
+        Inserts characters from the range `{first, last)`
+        before the character at index `pos`.
+
+        @par Precondition
+
+        `{first, last)` is a valid range.
+
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @note All references, pointers, or iterators
+        referring to contained elements are invalidated.
+        Any past-the-end iterators are also invalidated.
+
+        @tparam InputIt The type of the iterators.
+
+        @par Constraints
+
+        `InputIt` satisfies __InputIterator__.
+
+        @return `*this`
+
+        @param pos The index to insert at.
+
+        @param first The beginning of the character range.
+
+        @param last The end of the character range.
+
+        @throw std::length_error `size() + insert_count > max_size()`
+
+        @throw std::out_of_range `pos > size()`
+    */
     template<class InputIt
-    #ifndef GENERATING_DOCUMENTATION
+    #ifndef BOOST_JSON_DOCS
         ,class = is_inputit<InputIt>
     #endif
     >
-    iterator
+    string&
     insert(
-        const_iterator pos,
+        size_type pos,
         InputIt first,
         InputIt last);
 
-    BOOST_JSON_DECL
-    iterator
-    insert(
-        const_iterator pos,
-        std::initializer_list<char> init);
-
-    template<class T
-    #ifndef GENERATING_DOCUMENTATION
-        ,class = detail::is_string_viewish<T>
-    #endif
-    >
-    string&
-    insert(
-        std::size_t pos,
-        T const& t)
-    {
-        string_view s(t);
-        return insert(pos, s.data(), s.size());
-    }
-
-    template<class T
-    #ifndef GENERATING_DOCUMENTATION
-        ,class = detail::is_string_viewish<T>
-    #endif
-    >
-    string&
-    insert(
-        std::size_t pos,
-        T const& t,
-        std::size_t pos_str,
-        std::size_t count = npos)
-    {
-        return insert(pos,
-            string_view(t).substr(pos_str, count));
-    }
-
     //------------------------------------------------------
 
+    /** Erase characters from the string.
+        
+        Erases `num` characters from the string, starting
+        at `pos`.  `num` is determined as the smaller of
+        `count` and `size() - pos`.
+
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @note All references, pointers, or iterators
+        referring to contained elements are invalidated.
+        Any past-the-end iterators are also invalidated.
+
+        @return `*this`
+
+        @param pos The index to erase at.
+        The default argument for this parameter is `0`.
+
+        @param count The number of characters to erase.
+        The default argument for this parameter
+        is @ref npos.
+        
+        @throw std::out_of_range `pos > size()`
+    */
     BOOST_JSON_DECL
     string&
     erase(
         std::size_t pos = 0,
         std::size_t count = npos);
 
+    /** Erase a character from the string.
+        
+        Erases the character at `pos`.
+
+        @par Precondition
+
+        @code
+        pos >= data() && pos <= data() + size()
+        @endcode
+
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @note All references, pointers, or iterators
+        referring to contained elements are invalidated.
+        Any past-the-end iterators are also invalidated.
+
+        @return An iterator referring to character
+        immediately following the erased character, or
+        @ref end() if one does not exist.
+
+        @param pos An iterator referring to the
+        character to erase.
+    */
     BOOST_JSON_DECL
     iterator
     erase(const_iterator pos);
 
+    /** Erase a range from the string.
+
+        Erases the characters in the range `{first, last)`.
+
+        @par Precondition
+
+        `{first, last}` shall be valid within
+        @code
+        {data(), data() + size()}
+        @endcode
+
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @note All references, pointers, or iterators
+        referring to contained elements are invalidated.
+        Any past-the-end iterators are also invalidated.
+
+        @return An iterator referring to the character
+        `last` previously referred to, or @ref end()
+        if one does not exist.
+
+        @param first An iterator representing the first
+        character to erase.
+
+        @param last An iterator one past the last
+        character to erase.
+    */
     BOOST_JSON_DECL
     iterator
     erase(
@@ -1799,101 +1805,151 @@ public:
 
     //------------------------------------------------------
 
+    /** Append a character.
+        
+        Appends a character to the end of the string.
+
+        @par Exception Safety
+
+        Strong guarantee.
+        
+        @param ch The character to append.
+        
+        @throw std::length_error `size() + 1 > max_size()`
+    */
     BOOST_JSON_DECL
     void
     push_back(char ch);
 
+    /** Remove the last character.
+        
+        Removes a character from the end of the string.
+
+        @par Precondition
+
+        @code
+        not empty()
+        @endcode
+    */
     BOOST_JSON_DECL
     void
     pop_back();
 
     //------------------------------------------------------
 
+    /** Append characters to the string.
+        
+        Appends `count` copies of `ch` to the end of
+        the string.
+
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @return `*this`
+
+        @param count The number of characters to append.
+
+        @param ch The character to append.
+
+        @throw std::length_error `size() + count > max_size()`
+    */
     BOOST_JSON_DECL
     string&
     append(
         std::size_t count,
         char ch);
 
-    string&
-    append(string const& s)
-    {
-        return append(
-            s.data(), s.size());
-    }
+    /** Append a string to the string.
 
-    string&
-    append(
-        string const& s,
-        std::size_t pos,
-        std::size_t count = npos)
-    {
-        return append(
-            s.substr(pos, count));
-    }
+        Appends `sv` the end of the string.
 
-    string&
-    append(char const* s)
-    {
-        return append(s,
-            traits_type::length(s));
-    }
+        @par Exception Safety
 
+        Strong guarantee.
+
+        @return `*this`
+
+        @param sv The `string_view` to append.
+
+        @throw std::length_error `size() + s.size() > max_size()`
+    */
     BOOST_JSON_DECL
     string&
-    append(
-        char const* s,
-        std::size_t count);
+    append(string_view sv);
 
+    /** Append a range of characters.
+
+        Appends characters from the range `{first, last)`
+        to the end of the string.
+
+        @par Precondition
+
+        `{first, last)` shall be a valid range
+
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @tparam InputIt The type of the iterators.
+
+        @par Constraints
+
+        `InputIt` satisfies __InputIterator__.
+
+        @return `*this`
+
+        @param first An iterator representing the
+        first character to append.
+
+        @param last An iterator one past the
+        last character to append.
+
+        @throw std::length_error `size() + insert_count > max_size()`
+    */
     template<class InputIt
-    #ifndef GENERATING_DOCUMENTATION
+    #ifndef BOOST_JSON_DOCS
         ,class = is_inputit<InputIt>
     #endif
     >
     string&
     append(InputIt first, InputIt last);
 
-    string&
-    append(std::initializer_list<char> init)
-    {
-        return append(init.begin(), init.size());
-    }
-
-    template<class T
-    #ifndef GENERATING_DOCUMENTATION
-        ,class = detail::is_string_viewish<T>
-    #endif
-    >
-    string&
-    append(T const& t)
-    {
-        string_view s(t);
-        return append(s.data(), s.size());
-    }
-
-    template<class T
-    #ifndef GENERATING_DOCUMENTATION
-        ,class = detail::is_string_viewish<T>
-    #endif
-    >
-    string&
-    append(
-        T const& t,
-        std::size_t pos,
-        std::size_t count = npos)
-    {
-        auto s = string_view(t).substr(pos, count);
-        return append(s.data(), s.size());
-    }
-
     //------------------------------------------------------
 
+    /** Append characters from a string.
+
+        Appends `{sv.begin(), sv.end())` to the end of
+        the string.
+
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @return `*this`
+
+        @param sv The `string_view` to append.
+
+        @throw std::length_error `size() + sv.size() > max_size()`
+    */
     string&
-    operator+=(string const& s)
+    operator+=(string_view sv)
     {
-        return append(s);
+        return append(sv);
     }
 
+    /** Append a character.
+
+        Appends a character to the end of the string.
+
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @param ch The character to append.
+
+        @throw std::length_error `size() + 1 > max_size()`
+    */
     string&
     operator+=(char ch)
     {
@@ -1901,179 +1957,218 @@ public:
         return *this;
     }
 
-    string&
-    operator+=(char const* s)
-    {
-        return append(s);
-    }
+    //------------------------------------------------------
 
-    string&
-    operator+=(std::initializer_list<char> init)
-    {
-        return append(init);
-    }
+    /** Compare a string with the string.
+        
+        Let `comp` be
+        `traits_type::compare(data(), sv.data(), std::min(size(), sv.size())`.
+        If `comp != 0`, then the result is `comp`. Otherwise,
+        the result is `0` if `size() == sv.size()`,
+        `-1` if `size() < sv.size()`, and `1` otherwise.
 
-    template<class T
-    #ifndef GENERATING_DOCUMENTATION
-        ,class = detail::is_string_viewish<T>
-    #endif
-    >
-    string&
-    operator+=(T const& t)
+        @par Complexity
+
+        Linear.
+
+        @return The result of lexicographically comparing
+        the characters of `sv` and the string.
+
+        @param sv The `string_view` to compare.
+    */
+    int
+    compare(string_view sv) const noexcept
     {
-        return append(t);
+        return string_view(*this).compare(sv);
     }
 
     //------------------------------------------------------
 
-    int
-    compare(string const& s) const noexcept
-    {
-        return string_view(*this).compare(
-            string_view(s));
-    }
+    /** Return whether the string begins with a string.
 
-    int
-    compare(
-        std::size_t pos1,
-        std::size_t count1,
-        string const& s) const
-    {
-        return string_view(*this).compare(
-            pos1, count1, string_view(s));
-    }
+        Returns `true` if the string begins with `s`,
+        and `false` otherwise.
 
-    int
-    compare(
-        std::size_t pos1,
-        std::size_t count1,
-        string const& s,
-        std::size_t pos2,
-        std::size_t count2 = npos) const
-    {
-        return string_view(*this).compare(
-            pos1, count1, string_view(s),
-            pos2, count2);
-    }
+        @par Complexity
 
-    int
-    compare(char const* s) const
-    {
-        return string_view(*this).compare(s);
-    }
+        Linear.
 
-    int
-    compare(
-        std::size_t pos1,
-        std::size_t count1,
-        char const* s) const
-    {
-        return string_view(*this).compare(
-            pos1, count1, s);
-    }
-
-    int
-    compare(
-        std::size_t pos1,
-        std::size_t count1,
-        char const* s,
-        std::size_t count2) const
-    {
-        return string_view(*this).compare(
-            pos1, count1, s, count2);
-    }
-
-    int
-    compare(string_view s) const noexcept
-    {
-        return string_view(*this).compare(s);
-    }
-
-    int
-    compare(
-        std::size_t pos1,
-        std::size_t count1,
-        string_view s) const
-    {
-        return string_view(*this).compare(
-            pos1, count1, s);
-    }
-
-    int
-    compare(
-        std::size_t pos1,
-        std::size_t count1,
-        string_view s,
-        std::size_t pos2,
-        std::size_t count2 = npos) const
-    {
-        return string_view(*this).compare(
-            pos1, count1, s, pos2, count2);
-    }
-
-    //------------------------------------------------------
-
+        @param s The `string_view` to check for.
+    */
     bool
     starts_with(string_view s) const noexcept
     {
-        return substr(0, s.size()) == s;
+        return subview(0, s.size()) == s;
     }
 
+    /** Return whether the string begins with a character.
+
+        Returns `true` if the string begins with `ch`,
+        and `false` otherwise.
+
+        @par Complexity
+
+        Constant.
+
+        @param ch The character to check for.
+    */
     bool
     starts_with(char ch) const noexcept
     {
         return ! empty() && front() == ch;
     }
 
-    bool 
-    starts_with(char const* s) const
-    {
-        return starts_with(string_view(s));
-    }
+    /** Return whether the string end with a string.
 
+        Returns `true` if the string end with `s`,
+        and `false` otherwise.
+
+        @par Complexity
+
+        Linear.
+
+        @param s The string to check for.
+    */
     bool
     ends_with(string_view s) const noexcept
     {
         return size() >= s.size() &&
-            substr(size() - s.size()) == s;
+            subview(size() - s.size()) == s;
     }
 
+    /** Return whether the string ends with a character.
+
+        Returns `true` if the string ends with `ch`,
+        and `false` otherwise.
+
+        @par Complexity
+
+        Constant.
+
+        @param ch The character to check for.
+    */
     bool
     ends_with(char ch) const noexcept
     {
         return ! empty() && back() == ch;
     }
 
-    bool 
-    ends_with(char const* s) const
-    {
-        return ends_with(string_view(s));
-    }
-
     //------------------------------------------------------
 
+    /** Replace a substring with a string.
+
+        Replaces `rcount` characters starting at index
+        `pos` with those of `sv`, where `rcount` is
+        `std::min(count, size() - pos)`.
+
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @note All references, pointers, or iterators
+        referring to contained elements are invalidated. 
+        Any past-the-end iterators are also invalidated.
+
+        @return `*this`
+
+        @param pos The index to replace at.
+
+        @param count The number of characters to replace.
+
+        @param sv The `string_view` to replace with.
+
+        @throw std::length_error `size() + (sv.size() - rcount) > max_size()`
+
+        @throw std::out_of_range `pos > size()`
+    */
+    BOOST_JSON_DECL
     string&
     replace(
         std::size_t pos,
         std::size_t count,
-        string const& s);
+        string_view sv);
 
+    /** Replace a range with a string.
+
+        Replaces the characters in the range
+        `{first, last)` with those of `sv`.
+
+        @par Precondition
+
+        `{first, last)` is a valid range.
+
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @note All references, pointers, or iterators
+        referring to contained elements are invalidated.
+        Any past-the-end iterators are also invalidated.
+
+        @return `*this`
+
+        @param first An iterator referring to the first
+        character to replace.
+
+        @param last An iterator one past the end of
+        the last character to replace.
+
+        @param sv The `string_view` to replace with.
+
+        @throw std::length_error `size() + (sv.size() - std::distance(first, last)) > max_size()`
+    */
     string&
     replace(
         const_iterator first,
         const_iterator last,
-        string const& s);
+        string_view sv)
+    {
+        return replace(first - begin(), last - first, sv);
+    }
 
-    string&
-    replace(
-        std::size_t pos,
-        std::size_t count,
-        string const& s,
-        std::size_t pos2,
-        std::size_t count2 = npos);
+    /** Replace a range with a range.
 
+        Replaces the characters in the range
+        `{first, last)` with those of `{first2, last2)`.
+
+        @par Precondition
+
+        `{first, last)` is a valid range.
+
+        `{first2, last2)` is a valid range.
+
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @note All references, pointers, or iterators
+        referring to contained elements are invalidated.
+        Any past-the-end iterators are also invalidated.
+
+        @tparam InputIt The type of the iterators.
+
+        @par Constraints
+
+        `InputIt` satisfies __InputIterator__.
+
+        @return `*this`
+
+        @param first An iterator referring to the first
+        character to replace.
+
+        @param last An iterator one past the end of
+        the last character to replace.
+
+        @param first2 An iterator referring to the first
+        character to replace with.
+
+        @param last2 An iterator one past the end of
+        the last character to replace with.
+
+        @throw std::length_error `size() + (inserted - std::distance(first, last)) > max_size()`
+    */
     template<class InputIt
-    #ifndef GENERATING_DOCUMENTATION
+    #ifndef BOOST_JSON_DOCS
         ,class = is_inputit<InputIt>
     #endif
     >
@@ -2084,32 +2179,36 @@ public:
         InputIt first2,
         InputIt last2);
 
-    string&
-    replace(
-        std::size_t pos,
-        std::size_t count,
-        char const* s,
-        std::size_t count2);
+    /** Replace a substring with copies of a character.
 
-    string&
-    replace(
-        const_iterator first,
-        const_iterator last,
-        char const* s,
-        std::size_t count2);
+        Replaces `rcount` characters starting at index
+        `pos`with `count2` copies of `ch`, where
+        `rcount` is `std::min(count, size() - pos)`.
 
-    string&
-    replace(
-        std::size_t pos,
-        std::size_t count,
-        char const* s);
+        @par Exception Safety
 
-    string&
-    replace(
-        const_iterator first,
-        const_iterator last,
-        char const* s);
+        Strong guarantee.
 
+        @note All references, pointers, or iterators
+        referring to contained elements are invalidated.
+        Any past-the-end iterators are also invalidated.
+
+        @return `*this`
+
+        @param pos The index to replace at.
+
+        @param count The number of characters to replace.
+
+        @param count2 The number of characters to
+        replace with.
+
+        @param ch The character to replace with.
+
+        @throw std::length_error `size() + (count2 - rcount) > max_size()`
+
+        @throw std::out_of_range `pos > size()`
+    */
+    BOOST_JSON_DECL
     string&
     replace(
         std::size_t pos,
@@ -2117,58 +2216,72 @@ public:
         std::size_t count2,
         char ch);
 
+    /** Replace a range with copies of a character.
+
+        Replaces the characters in the range
+        `{first, last)` with `count` copies of `ch`.
+
+        @par Precondition
+
+        `{first, last)` is a valid range.
+
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @note All references, pointers, or iterators
+        referring to contained elements are invalidated.
+        Any past-the-end iterators are also invalidated.
+
+        @return `*this`
+
+        @param first An iterator referring to the first
+        character to replace.
+
+        @param last An iterator one past the end of
+        the last character to replace.
+
+        @param count The number of characters to
+        replace with.
+
+        @param ch The character to replace with.
+
+        @throw std::length_error `size() + (count - std::distance(first, last)) > max_size()`
+    */
     string&
     replace(
         const_iterator first,
         const_iterator last,
-        std::size_t count2,
-        char ch);
-
-    string&
-    replace(
-        const_iterator first,
-        const_iterator last,
-        std::initializer_list<char> init);
-
-    template<class T
-    #ifndef GENERATING_DOCUMENTATION
-        ,class = detail::is_string_viewish<T>
-    #endif
-    >
-    string&
-    replace(
-        std::size_t pos,
         std::size_t count,
-        T const& t);
-
-    template<class T
-    #ifndef GENERATING_DOCUMENTATION
-        ,class = detail::is_string_viewish<T>
-    #endif
-    >
-    string&
-    replace(
-        const_iterator first,
-        const_iterator last,
-        T const& t);
-
-    template<class T
-    #ifndef GENERATING_DOCUMENTATION
-        ,class = detail::is_string_viewish<T>
-    #endif
-    >
-    string&
-    replace(
-        std::size_t pos,
-        std::size_t count,
-        T const& t,
-        std::size_t pos2,
-        std::size_t count2 = npos);
+        char ch)
+    {
+        return replace(first - begin(), last - first, count, ch);
+    }
 
     //------------------------------------------------------
 
+    /** Return a substring.
+
+        Returns a view of a substring.
+
+        @par Exception Safety
+
+        Strong guarantee.
+
+        @return A `string_view` object referring 
+        to `{data() + pos, std::min(count, size() - pos))`.
+
+        @param pos The index to being the substring at.
+        The default argument for this parameter is `0`.
+
+        @param count The length of the substring.
+        The default argument for this parameter
+        is @ref npos.
+
+        @throw std::out_of_range `pos > size()`
+    */
     string_view
-    substr(
+    subview(
         std::size_t pos = 0,
         std::size_t count = npos) const
     {
@@ -2177,6 +2290,25 @@ public:
 
     //------------------------------------------------------
 
+    /** Copy a substring to another string.
+
+        Copies `std::min(count, size() - pos)` characters
+        starting at index `pos` to the string pointed
+        to by `dest`.
+
+        @note The resulting string is not null terminated.
+
+        @return The number of characters copied.
+
+        @param count The number of characters to copy.
+
+        @param dest The string to copy to.
+
+        @param pos The index to begin copying from. The 
+        default argument for this parameter is `0`.
+
+        @throw std::out_of_range `pos > max_size()`
+    */
     std::size_t
     copy(
         char* dest,
@@ -2188,12 +2320,37 @@ public:
 
     //------------------------------------------------------
 
+    /** Change the size of the string.
+        
+        Resizes the string to contain `count` characters.
+        If `count > size()`, characters with the value `0`
+        are appended. Otherwise, `size()` is reduced
+        to `count`.
+
+        @param count The size to resize the string to.
+
+        @throw std::out_of_range `count > max_size()`
+    */
     void
     resize(std::size_t count)
     {
         resize(count, 0);
     }
 
+    /** Change the size of the string.
+
+        Resizes the string to contain `count` characters.
+        If `count > size()`, copies of `ch` are
+        appended. Otherwise, `size()` is reduced
+        to `count`.
+
+        @param count The size to resize the string to.
+
+        @param ch The characters to append if the size
+        increases.
+
+        @throw std::out_of_range `count > max_size()`
+    */
     BOOST_JSON_DECL
     void
     resize(std::size_t count, char ch);
@@ -2214,10 +2371,6 @@ public:
         count <= capacity() - size()
         @endcode
 
-        @par Exception Safety
-        
-        No-throw guarantee.
-
         @param n The amount to increase the size by.
     */
     void
@@ -2233,7 +2386,7 @@ public:
     /** Swap the contents.
 
         Exchanges the contents of this string with another
-        string. Ownership of the respective @ref storage
+        string. Ownership of the respective @ref memory_resource
         objects is not transferred.
 
         @li If `*other.storage() == *sp`, ownership of the
@@ -2242,21 +2395,28 @@ public:
         references remain valid.
 
         @li If `*other.storage() != *sp`, the contents are
-        logically swapped by making a copy, which can throw.
-        In this case all iterators and references are invalidated.
+        logically swapped by making a copy, which can
+        throw. In this case all iterators and
+        references are invalidated.
 
-        @par Preconditions
-
-        `&other != this`
-        
         @par Complexity
 
-        Constant or linear in @ref size() plus `other.size()`.
+        Constant or linear in @ref size() plus
+        `other.size()`.
+
+        @par Precondition
+
+        @code
+        &other != this
+        @endcode
+        
+        @note 
+
+        Calls to `memory_resource::allocate` may throw.
 
         @par Exception Safety
 
         Strong guarantee.
-        Calls to @ref storage::allocate may throw.
 
         @param other The string to swap with
     */
@@ -2270,32 +2430,53 @@ public:
     //
     //------------------------------------------------------
 
+    /** Find the first occurrence of a string within the string.
+        
+        Returns the lowest index `idx` greater than or equal
+        to `pos` where each element of `sv`  is equal to
+        that of `{begin() + idx, begin() + idx + sv.size())`
+        if one exists, and @ref npos otherwise.
+
+        @par Complexity
+
+        Linear.
+
+        @return The first occurrence of `sv` within the
+        string starting at the index `pos`, or @ref npos
+        if none exists.
+
+        @param sv The `string_view` to search for.
+
+        @param pos The index to start searching at.
+        The default argument for this parameter is `0`.
+    */
     std::size_t
     find(
-        string const& s,
+        string_view sv,
         std::size_t pos = 0) const noexcept
     {
-        return string_view(*this).find(string_view(s), pos);
+        return string_view(*this).find(sv, pos);
     }
 
-    std::size_t
-    find(
-        char const* s,
-        std::size_t pos,
-        std::size_t count) const
-    {
-        return string_view(*this).find(s, pos, count);
-    }
+    /** Find the first occurrence of a character within the string.
+        
+        Returns the index corrosponding to the first
+        occurrence of `ch` within `{begin() + pos, end())`
+        if it exists, and @ref npos otherwise.
 
-    std::size_t
-    find(
-        char const* s,
-        std::size_t pos = 0) const
-    {
-        return string_view(*this).find(s, pos);
-    }
+        @par Complexity
 
+        Linear.
 
+        @return The first occurrence of `ch` within the 
+        string starting at the index `pos`, or @ref npos
+        if none exists.
+
+        @param ch The character to search for.
+
+        @param pos The index to start searching at.
+        The default argument for this parameter is `0`.
+    */
     std::size_t
     find(
         char ch,
@@ -2304,46 +2485,57 @@ public:
         return string_view(*this).find(ch, pos);
     }
 
-    template<class T
-    #ifndef GENERATING_DOCUMENTATION
-        ,class = detail::is_string_viewish<T>
-    #endif
-    >
-    std::size_t
-    find(
-        T const &t,
-        std::size_t pos = 0) const noexcept
-    {
-        return string_view(*this).find(t, pos);
-    }
-
     //------------------------------------------------------
 
+    /** Find the last occurrence of a string within the string.
+
+        Returns the highest index `idx` less than or equal
+        to `pos` where each element of `sv` is equal to that
+        of `{begin() + idx, begin() + idx + sv.size())`
+        if one exists, and @ref npos otherwise.
+
+        @par Complexity
+
+        Linear.
+
+        @return The last occurrence of `sv` within the
+        string starting before or at the index `pos`,
+        or @ref npos if none exists.
+
+        @param sv The `string_view` to search for.
+
+        @param pos The index to start searching at.
+        The default argument for this parameter
+        is @ref npos.
+    */
     std::size_t
     rfind(
-        string const& s,
+        string_view sv,
         std::size_t pos = npos) const noexcept
     {
-        return string_view(*this).rfind(string_view(s), pos);
+        return string_view(*this).rfind(sv, pos);
     }
 
-    std::size_t
-    rfind(
-        char const* s,
-        std::size_t pos,
-        std::size_t count) const
-    {
-        return string_view(*this).rfind(s, pos, count);
-    }
+    /** Find the last occurrence of a character within the string.
 
-    std::size_t
-    rfind(
-        char const* s,
-        std::size_t pos = npos) const
-    {
-        return string_view(*this).rfind(s, pos);
-    }
+        Returns index corrosponding to the last occurrence
+        of `ch` within `{begin(), begin() + pos}` if it
+        exists, and @ref npos otherwise.
 
+        @par Complexity
+
+        Linear.
+
+        @return The last occurrence of `ch` within the
+        string starting before or at the index `pos`,
+        or @ref npos if none exists.
+
+        @param ch The character to search for.
+
+        @param pos The index to stop searching at.
+        The default argument for this parameter
+        is @ref npos.
+    */
     std::size_t
     rfind(
         char ch,
@@ -2352,94 +2544,86 @@ public:
         return string_view(*this).rfind(ch, pos);
     }
 
-    template<class T
-    #ifndef GENERATING_DOCUMENTATION
-        ,class = detail::is_string_viewish<T>
-    #endif
-    >
+    //------------------------------------------------------
+
+    /** Find the first occurrence of any of the characters within the string.
+
+        Returns the index corrosponding to the first
+        occurrence of any of the characters of `sv`
+        within `{begin() + pos, end())` if it exists,
+        and @ref npos otherwise.
+
+        @par Complexity
+
+        Linear.
+
+        @return The first occurrence of any of the
+        characters within `sv` within the string
+        starting at the index `pos`, or @ref npos
+        if none exists.
+
+        @param sv The characters to search for.
+
+        @param pos The index to start searching at.
+        The default argument for this parameter is `0`.
+    */
     std::size_t
-    rfind(
-        T const& t,
-        std::size_t pos = npos) const noexcept
+    find_first_of(
+        string_view sv,
+        std::size_t pos = 0) const noexcept
     {
-        return string_view(*this).rfind(t, pos);
+        return string_view(*this).find_first_of(sv, pos);
     }
 
     //------------------------------------------------------
 
-    std::size_t
-    find_first_of(
-        string const& s,
-        std::size_t pos = 0) const noexcept
-    {
-        return string_view(*this).find_first_of(string_view(s), pos);
-    }
+    /** Find the first occurrence of any of the characters not within the string.
 
-    std::size_t
-    find_first_of(
-        char const* s,
-        std::size_t pos,
-        std::size_t count) const
-    {
-        return string_view(*this).find_first_of(s, pos, count);
-    }
+        Returns the index corrosponding to the first
+        character of `{begin() + pos, end())` that is
+        not within `sv` if it exists, and @ref npos
+        otherwise.
 
-    std::size_t
-    find_first_of(
-        char const* s,
-        std::size_t pos = 0) const
-    {
-        return string_view(*this).find_first_of(s, pos);
-    }
+        @par Complexity
 
-    std::size_t
-    find_first_of(
-        char ch,
-        std::size_t pos = 0) const noexcept
-    {
-        return string_view(*this).find_first_of(ch, pos);
-    }
+        Linear.
 
-    template<class T
-    #ifndef GENERATING_DOCUMENTATION
-        ,class = detail::is_string_viewish<T>
-    #endif
-    >
-    std::size_t
-    find_first_of(
-        T const& t,
-        std::size_t pos = 0) const noexcept
-    {
-        return string_view(*this).find_first_of(t, pos);
-    }
+        @return The first occurrence of a character that
+        is not within `sv` within the string starting at
+        the index `pos`, or @ref npos if none exists.
 
-    //------------------------------------------------------
+        @param sv The characters to ignore.
 
+        @param pos The index to start searching at.
+        The default argument for this parameter is `0`.
+    */
     std::size_t
     find_first_not_of(
-        string const& s,
+        string_view sv,
         std::size_t pos = 0) const noexcept
     {
-        return string_view(*this).find_first_not_of(string_view(s), pos);
+        return string_view(*this).find_first_not_of(sv, pos);
     }
 
-    std::size_t
-    find_first_not_of(
-        char const* s,
-        std::size_t pos,
-        std::size_t count) const
-    {
-        return string_view(*this).find_first_not_of(s, pos, count);
-    }
+    /** Find the first occurrence of a character not equal to `ch`.
 
-    std::size_t
-    find_first_not_of(
-        char const* s,
-        std::size_t pos = 0) const
-    {
-        return string_view(*this).find_first_not_of(s, pos);
-    }
+        Returns the index corrosponding to the first
+        character of `{begin() + pos, end())` that is
+        not equal to `ch` if it exists, and
+        @ref npos otherwise.
 
+        @par Complexity
+
+        Linear.
+
+        @return The first occurrence of a character that
+        is not equal to `ch`, or @ref npos if none exists.
+
+        @param ch The character to ignore.
+
+        @param pos The index to start searching at.
+        The default argument for this parameter is `0`.
+    */
     std::size_t
     find_first_not_of(
         char ch,
@@ -2448,113 +2632,95 @@ public:
         return string_view(*this).find_first_not_of(ch, pos);
     }
 
-    template<class T
-    #ifndef GENERATING_DOCUMENTATION
-        ,class = detail::is_string_viewish<T>
-    #endif
-    >
+    //------------------------------------------------------
+
+    /** Find the last occurrence of any of the characters within the string.
+
+        Returns the index corrosponding to the last
+        occurrence of any of the characters of `sv` within
+        `{begin(), begin() + pos}` if it exists,
+        and @ref npos otherwise.
+
+        @par Complexity
+
+        Linear.
+
+        @return The last occurrence of any of the 
+        characters within `sv` within the string starting
+        before or at the index `pos`, or @ref npos if
+        none exists.
+
+        @param sv The characters to search for.
+
+        @param pos The index to stop searching at.
+        The default argument for this parameter
+        is @ref npos.
+    */
     std::size_t
-    find_first_not_of(
-        T const& t,
-        std::size_t pos = 0) const noexcept
+    find_last_of(
+        string_view sv,
+        std::size_t pos = npos) const noexcept
     {
-        return string_view(*this).find_first_not_of(t, pos);
+        return string_view(*this).find_last_of(sv, pos);
     }
 
     //------------------------------------------------------
 
-    std::size_t
-    find_last_of(
-        string const& s,
-        std::size_t pos = 0) const noexcept
-    {
-        return string_view(*this).find_last_of(string_view(s), pos);
-    }
+    /** Find the last occurrence of a character not within the string.
 
-    std::size_t
-    find_last_of(
-        char const* s,
-        std::size_t pos,
-        std::size_t count) const
-    {
-        return string_view(*this).find_last_of(s, pos, count);
-    }
+        Returns the index corrosponding to the last
+        character of `{begin(), begin() + pos}` that is not
+        within `sv` if it exists, and @ref npos otherwise.
 
-    std::size_t
-    find_last_of(
-        char const* s,
-        std::size_t pos = 0) const
-    {
-        return string_view(*this).find_last_of(s, pos);
-    }
+        @par Complexity
 
-    std::size_t
-    find_last_of(
-        char ch,
-        std::size_t pos = 0) const noexcept
-    {
-        return string_view(*this).find_last_of(ch, pos);
-    }
+        Linear.
 
-    template<class T
-    #ifndef GENERATING_DOCUMENTATION
-        ,class = detail::is_string_viewish<T>
-    #endif
-    >
-    std::size_t
-    find_last_of(
-        T const& t,
-        std::size_t pos = 0) const noexcept
-    {
-        return string_view(*this).find_last_of(t, pos);
-    }
+        @return The last occurrence of a character that is
+        not within `sv` within the string before or at the
+        index `pos`, or @ref npos if none exists.
 
-    //------------------------------------------------------
+        @param sv The characters to ignore.
 
+        @param pos The index to stop searching at.
+        The default argument for this parameter
+        is @ref npos.
+    */
     std::size_t
     find_last_not_of(
-        string const& s,
-        std::size_t pos = 0) const noexcept
+        string_view sv,
+        std::size_t pos = npos) const noexcept
     {
-        return string_view(*this).find_last_not_of(string_view(s), pos);
+        return string_view(*this).find_last_not_of(sv, pos);
     }
 
-    std::size_t
-    find_last_not_of(
-        char const* s,
-        std::size_t pos,
-        std::size_t count) const
-    {
-        return string_view(*this).find_last_not_of(s, pos, count);
-    }
+    /** Find the last occurrence of a character not equal to `ch`.
 
-    std::size_t
-    find_last_not_of(
-        char const* s,
-        std::size_t pos = 0) const
-    {
-        return string_view(*this).find_last_not_of(s, pos);
-    }
+        Returns the index corrosponding to the last
+        character of `{begin(), begin() + pos}` that is
+        not equal to `ch` if it exists, and @ref npos
+        otherwise.
 
+        @par Complexity
+
+        Linear.
+
+        @return The last occurrence of a character that 
+        is not equal to `ch` before or at the index `pos`,
+        or @ref npos if none exists.
+
+        @param ch The character to ignore.
+
+        @param pos The index to start searching at.
+        The default argument for this parameter
+        is @ref npos.
+    */
     std::size_t
     find_last_not_of(
         char ch,
-        std::size_t pos = 0) const noexcept
+        std::size_t pos = npos) const noexcept
     {
         return string_view(*this).find_last_not_of(ch, pos);
-    }
-
-    template<class T
-    #ifndef GENERATING_DOCUMENTATION
-        ,class = detail::is_string_viewish<T>
-    #endif
-    >
-    std::size_t
-    find_last_not_of(
-        T const& t,
-        std::size_t pos = 0) const noexcept
-    {
-        return string_view(*this).find_last_not_of(t, pos);
     }
 
 private:
@@ -2595,7 +2761,7 @@ private:
 
     Exchanges the contents of the string `lhs` with
     another string `rhs`. Ownership of the respective
-    @ref storage objects is not transferred.
+    @ref memory_resource objects is not transferred.
 
     @li If `*lhs.storage() == *rhs.storage()`,
     ownership of the underlying memory is swapped in
@@ -2607,9 +2773,11 @@ private:
     which can throw. In this case all iterators and
     references are invalidated.
 
-    @par Preconditions
+    @par Precondition
 
-    `&lhs != &rhs`
+    @code
+    &lhs != &rhs
+    @endcode
         
     @par Complexity
 
@@ -2618,7 +2786,10 @@ private:
     @par Exception Safety
 
     Strong guarantee.
-    Calls to @ref storage::allocate may throw.
+
+    @note
+
+    Calls to `memory_resource::allocate` may throw.
 
     @param lhs The string to exchange.
 
@@ -2637,18 +2808,15 @@ swap(string& lhs, string& rhs)
 
     Behaves as a formatted output function.
 */
-inline
+BOOST_JSON_DECL
 std::ostream&
-operator<<(std::ostream& os, string const& s)
-{
-    return os << static_cast<string_view>(s);
-}
+operator<<(std::ostream& os, string const& s);
 
 /** Return true if lhs equals rhs.
 
     A lexicographical comparison is used.
 */
-#ifdef GENERATING_DOCUMENTATION
+#ifdef BOOST_JSON_DOCS
 bool
 operator==(string const& lhs, string const& rhs) noexcept
 #else
@@ -2671,7 +2839,7 @@ operator==(T const& lhs, U const& rhs) noexcept
 
     A lexicographical comparison is used.
 */
-#ifdef GENERATING_DOCUMENTATION
+#ifdef BOOST_JSON_DOCS
 bool
 operator!=(string const& lhs, string const& rhs) noexcept
 #else
@@ -2694,7 +2862,7 @@ operator!=(T const& lhs, U const& rhs) noexcept
 
     A lexicographical comparison is used.
 */
-#ifdef GENERATING_DOCUMENTATION
+#ifdef BOOST_JSON_DOCS
 bool
 operator<(string const& lhs, string const& rhs) noexcept
 #else
@@ -2717,7 +2885,7 @@ operator<(T const& lhs, U const& rhs) noexcept
 
     A lexicographical comparison is used.
 */
-#ifdef GENERATING_DOCUMENTATION
+#ifdef BOOST_JSON_DOCS
 bool
 operator<=(string const& lhs, string const& rhs) noexcept
 #else
@@ -2736,7 +2904,7 @@ operator<=(T const& lhs, U const& rhs) noexcept
     return string_view(lhs) <= string_view(rhs);
 }
 
-#ifdef GENERATING_DOCUMENTATION
+#ifdef BOOST_JSON_DOCS
 bool
 operator>=(string const& lhs, string const& rhs) noexcept
 #else
@@ -2759,7 +2927,7 @@ operator>=(T const& lhs, U const& rhs) noexcept
 
     A lexicographical comparison is used.
 */
-#ifdef GENERATING_DOCUMENTATION
+#ifdef BOOST_JSON_DOCS
 bool
 operator>(string const& lhs, string const& rhs) noexcept
 #else
@@ -2780,6 +2948,35 @@ operator>(T const& lhs, U const& rhs) noexcept
 
 } // json
 } // boost
+
+// std::hash specialization
+#ifndef BOOST_JSON_DOCS
+namespace std {
+template<>
+struct hash<::boost::json::string>
+{
+    hash() = default;
+    hash(hash const&) = default;
+    hash& operator=(hash const&) = default;
+
+    explicit
+    hash(std::size_t salt) noexcept
+        : salt_(salt)
+    {
+    }
+
+    std::size_t
+    operator()(::boost::json::string const& js) const noexcept
+    {
+        return ::boost::json::detail::digest(
+            js.data(), js.size(), salt_);
+    }
+
+private:
+    std::size_t salt_ = 0;
+};
+} // std
+#endif
 
 #include <boost/json/impl/string.hpp>
 #ifdef BOOST_JSON_HEADER_ONLY

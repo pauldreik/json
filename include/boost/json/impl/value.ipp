@@ -4,14 +4,13 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/vinniefalco/json
+// Official repository: https://github.com/cppalliance/json
 //
 
 #ifndef BOOST_JSON_IMPL_VALUE_IPP
 #define BOOST_JSON_IMPL_VALUE_IPP
 
 #include <boost/json/value.hpp>
-#include <boost/config.hpp>
 #include <cstring>
 #include <limits>
 #include <new>
@@ -19,66 +18,6 @@
 
 namespace boost {
 namespace json {
-
-//----------------------------------------------------------
-
-struct value::init_iter
-{
-    using value_type = std::pair<
-        string_view const, value const&>;
-    using pointer = value_type const*;
-    using reference = value_type const&;
-    using difference_type = std::ptrdiff_t;
-    using iterator_category =
-        std::forward_iterator_tag;
-
-    std::initializer_list<
-        value>::iterator it_;
-
-    init_iter&
-    operator++() noexcept
-    {
-        ++it_;
-        return *this;
-    }
-
-    init_iter
-    operator++(int) noexcept
-    {
-        auto tmp = *this;
-        ++it_;
-        return tmp;
-    }
-
-    value_type
-    operator*() const noexcept
-    {
-        return {
-            (*it_->if_array())[0].as_string(),
-            (*it_->if_array())[1] };
-    }
-
-    bool
-    operator==(
-        init_iter const& other) const noexcept
-    {
-        return it_ == other.it_;
-    }
-
-    bool
-    operator!=(
-        init_iter const& other) const noexcept
-    {
-        return it_ != other.it_;
-    }
-
-    BOOST_STATIC_ASSERT(
-        std::is_constructible<
-            object::value_type,
-            init_iter::value_type>::value);
-};
-
-//----------------------------------------------------------
 
 value::
 ~value()
@@ -275,25 +214,17 @@ operator=(value const& other)
 
 value::
 value(
-    std::initializer_list<value> init,
+    std::initializer_list<value_ref> init,
     storage_ptr sp)
 {
-    if(maybe_object(init))
-    {
-        if(init.size() > object::max_size())
-            BOOST_THROW_EXCEPTION(
-                detail::object_too_large_exception());
+    if(value_ref::maybe_object(init))
         ::new(&obj_) object(
-            init_iter{init.begin()},
-            init_iter{init.end()},
-            init.size(),
-            detail::move(sp));
-    }
+            value_ref::make_object(
+                init, std::move(sp)));
     else
-    {
         ::new(&arr_) array(
-            init, detail::move(sp));
-    }
+            value_ref::make_array(
+                init, std::move(sp)));
 }
 
 //----------------------------------------------------------
@@ -306,24 +237,21 @@ object&
 value::
 emplace_object() noexcept
 {
-    ::new(&obj_) object(destroy());
-    return obj_;
+    return *::new(&obj_) object(destroy());
 }
 
 array&
 value::
 emplace_array() noexcept
 {
-    ::new(&arr_) array(destroy());
-    return arr_;
+    return *::new(&arr_) array(destroy());
 }
 
 string&
 value::
 emplace_string() noexcept
 {
-    ::new(&str_) string(destroy());
-    return str_;
+    return *::new(&str_) string(destroy());
 }
 
 std::int64_t&
@@ -399,36 +327,6 @@ swap(value& other)
 
 //----------------------------------------------------------
 //
-// Observers
-//
-//----------------------------------------------------------
-
-bool
-value::
-is_key_value_pair() const noexcept
-{
-    if(! is_array())
-        return false;
-    if(arr_.size() != 2)
-        return false;
-    if(! arr_[0].is_string())
-        return false;
-    return true;
-}
-
-bool
-value::
-maybe_object(
-    std::initializer_list<value> init) noexcept
-{
-    for(auto const& v : init)
-        if(! v.is_key_value_pair())
-            return false;
-    return true;
-}
-
-//----------------------------------------------------------
-//
 // Accessors
 //
 //----------------------------------------------------------
@@ -473,15 +371,15 @@ key_value_pair::
 ~key_value_pair()
 {
     auto const& sp = value_.storage();
-    if(sp->need_free())
-        sp->deallocate(key_, len_ + 1, 1);
+    if(sp.is_not_counted_and_deallocate_is_null())
+        return;
+    sp->deallocate(key_, len_ + 1, 1);
 }
 
 key_value_pair::
 key_value_pair(
     key_value_pair const& other)
     : value_(other.value_)
-    , len_(other.len_)
     , key_(
         [&]
         {
@@ -492,6 +390,7 @@ key_value_pair(
             s[other.len_] = 0;
             return s;
         }())
+    , len_(other.len_)
 {
 }
 
@@ -501,7 +400,6 @@ key_value_pair(
     key_value_pair const& other,
     storage_ptr sp)
     : value_(other.value_, detail::move(sp))
-    , len_(other.len_)
     , key_(
         [&]
         {
@@ -512,6 +410,7 @@ key_value_pair(
             s[other.len_] = 0;
             return s;
         }())
+    , len_(other.len_)
 {
 }
 

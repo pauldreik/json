@@ -4,7 +4,7 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/vinniefalco/json
+// Official repository: https://github.com/cppalliance/json
 //
 
 #ifndef BOOST_JSON_TEST_HPP
@@ -15,11 +15,13 @@
 #include <boost/json/serializer.hpp>
 #include <boost/json/storage_ptr.hpp>
 #include <boost/json/detail/format.hpp>
-#include <boost/beast/_experimental/unit_test/suite.hpp>
+
 #include <cstddef>
 #include <iterator>
 #include <memory>
 #include <type_traits>
+
+#include "test_suite.hpp"
 
 namespace boost {
 namespace json {
@@ -36,31 +38,22 @@ struct test_failure : std::exception
     }
 };
 
-struct fail_storage
+struct fail_resource
+    : memory_resource
 {
-    static
-    constexpr
-    std::uint64_t
-    id = 0;
-
-    static
-    constexpr
-    bool
-    need_free = true;
-
     std::size_t fail_max = 0;
     std::size_t fail = 0;
     std::size_t nalloc = 0;
 
-    ~fail_storage()
+    ~fail_resource()
     {
-        BEAST_EXPECT(nalloc == 0);
+        BOOST_TEST(nalloc == 0);
     }
 
     void*
-    allocate(
+    do_allocate(
         std::size_t n,
-        std::size_t)
+        std::size_t) override
     {
         if(++fail == fail_max)
         {
@@ -74,14 +67,21 @@ struct fail_storage
     }
 
     void
-    deallocate(
+    do_deallocate(
         void* p,
         std::size_t,
-        std::size_t) noexcept
+        std::size_t) noexcept override
     {
-        if(BEAST_EXPECT(nalloc > 0))
+        if(BOOST_TEST(nalloc > 0))
             --nalloc;
         ::operator delete(p);
+    }
+
+    bool
+    do_is_equal(
+        memory_resource const& mr) const noexcept override
+    {
+        return this == &mr;
     }
 };
 
@@ -89,13 +89,13 @@ template<class F>
 void
 fail_loop(F&& f)
 {
-    scoped_storage<fail_storage> ss;
-    ss->fail_max = 1;
-    while(ss->fail < 200)
+    fail_resource ss;
+    ss.fail_max = 1;
+    while(ss.fail < 200)
     {
         try
         {
-            f(ss);
+            f(&ss);
         }
         catch(test_failure const&)
         {
@@ -103,166 +103,245 @@ fail_loop(F&& f)
         }
         break;
     }
-    BEAST_EXPECT(ss->fail < 200);
+    BOOST_TEST(ss.fail < 200);
 }
 
 //----------------------------------------------------------
 
-struct unique_storage
+struct unique_resource
+    : memory_resource
 {
-    static
-    constexpr
-    std::uint64_t
-    id = 0;
-
-    static
-    constexpr
-    bool
-    need_free = true;
+    unique_resource() = default;
 
     void*
-    allocate(
+    do_allocate(
         std::size_t n,
-        std::size_t)
+        std::size_t) override
     {
         return ::operator new(n);
     }
 
     void
-    deallocate(
+    do_deallocate(
         void* p,
         std::size_t,
-        std::size_t) noexcept
+        std::size_t) noexcept override
     {
         return ::operator delete(p);
+    }
+
+    bool
+    do_is_equal(
+        memory_resource const& mr) const noexcept override
+    {
+        return this == &mr;
     }
 };
 
 //----------------------------------------------------------
 
-class fail_parser
-    : public basic_parser
+// The null parser discards all the data
+
+class null_parser : public basic_parser
 {
+    friend class boost::json::basic_parser;
+
+    bool on_document_begin( error_code& ) { return true; }
+    bool on_document_end( error_code& ) { return true; }
+    bool on_object_begin( error_code& ) { return true; }
+    bool on_object_end( error_code& ) { return true; }
+    bool on_array_begin( error_code& ) { return true; }
+    bool on_array_end( error_code& ) { return true; }
+    bool on_key_part( string_view, error_code& ) { return true; }
+    bool on_key( string_view, error_code& ) { return true; }
+    bool on_string_part( string_view, error_code& ) { return true; }
+    bool on_string( string_view, error_code& ) { return true; }
+    bool on_number_part( string_view, error_code&) { return true; }
+    bool on_int64( std::int64_t, string_view, error_code& ) { return true; }
+    bool on_uint64( std::uint64_t, string_view, error_code& ) { return true; }
+    bool on_double( double, string_view, error_code& ) { return true; }
+    bool on_bool( bool, error_code& ) { return true; }
+    bool on_null( error_code& ) { return true; }
+    bool on_comment_part( string_view, error_code& ) { return true; }
+    bool on_comment( string_view, error_code& ) { return true; }
+
+public:
+    null_parser() = default;
+
+    null_parser(parse_options po) 
+        : basic_parser(po)
+    {
+    }
+        
+    std::size_t
+    write(
+        char const* data,
+        std::size_t size,
+        error_code& ec)
+    {
+        auto const n =
+            basic_parser::write_some(
+            *this, false, data, size, ec);
+        if(! ec && n < size)
+            ec = error::extra_data;
+        return n;
+    }
+};
+
+//----------------------------------------------------------
+
+class fail_parser : public basic_parser
+{
+    friend class basic_parser;
+
     std::size_t n_ = std::size_t(-1);
 
-    void
+    bool
     maybe_fail(error_code& ec)
     {
         if(n_ && --n_ > 0)
-            return;
+            return true;
         ec = error::test_failure;
+        return false;
     }
 
-    void
+    bool
     on_document_begin(
-        error_code& ec) override
+        error_code& ec)
     {
-        maybe_fail(ec);
+        return maybe_fail(ec);
     }
 
-    void
+    bool
     on_document_end(
-        error_code& ec) override
+        error_code& ec)
     {
-        maybe_fail(ec);
+        return maybe_fail(ec);
     }
 
-    void
+    bool
     on_object_begin(
-        error_code& ec) override
+        error_code& ec)
     {
-        maybe_fail(ec);
+        return maybe_fail(ec);
     }
 
-    void
+    bool
     on_object_end(
-        error_code& ec) override
+        error_code& ec)
     {
-        maybe_fail(ec);
+        return maybe_fail(ec);
     }
 
-    void
+    bool
     on_array_begin(
-        error_code& ec) override
+        error_code& ec)
     {
-        maybe_fail(ec);
+        return maybe_fail(ec);
     }
 
-    void
+    bool
     on_array_end(
-        error_code& ec) override
+        error_code& ec)
     {
-        maybe_fail(ec);
+        return maybe_fail(ec);
     }
 
-    void
+    bool
     on_key_part(
         string_view,
-        error_code& ec) override
+        error_code& ec)
     {
-        maybe_fail(ec);
+        return maybe_fail(ec);
     }
 
-    void
+    bool
     on_key(
         string_view,
-        error_code& ec) override
+        error_code& ec)
     {
-        maybe_fail(ec);
+        return maybe_fail(ec);
     }
         
-    void
+    bool
     on_string_part(
         string_view,
-        error_code& ec) override
+        error_code& ec)
     {
-        maybe_fail(ec);
+        return maybe_fail(ec);
     }
 
-    void
+    bool
     on_string(
         string_view,
-        error_code& ec) override
+        error_code& ec)
     {
-        maybe_fail(ec);
+        return maybe_fail(ec);
     }
 
-    void
+    bool
+    on_number_part(
+        string_view,
+        error_code& ec)
+    {
+        return maybe_fail(ec);
+    }
+
+    bool
     on_int64(
         int64_t,
-        error_code& ec) override
+        string_view,
+        error_code& ec)
     {
-        maybe_fail(ec);
+        return maybe_fail(ec);
     }
 
-    void
+    bool
     on_uint64(
         uint64_t,
-        error_code& ec) override
+        string_view,
+        error_code& ec)
     {
-        maybe_fail(ec);
+        return maybe_fail(ec);
     }
 
-    void
+    bool
     on_double(
         double,
-        error_code& ec) override
+        string_view,
+        error_code& ec)
     {
-        maybe_fail(ec);
+        return maybe_fail(ec);
     }
 
-    void
+    bool
     on_bool(
         bool,
-        error_code& ec) override
+        error_code& ec)
     {
-        maybe_fail(ec);
+        return maybe_fail(ec);
     }
 
-    void
-    on_null(error_code& ec) override
+    bool
+    on_null(error_code& ec)
     {
-        maybe_fail(ec);
+        return maybe_fail(ec);
+    }
+
+    bool 
+    on_comment_part(
+        string_view, 
+        error_code& ec) 
+    { 
+        return maybe_fail(ec); 
+    }
+    
+    bool
+    on_comment(
+        string_view, 
+        error_code& ec) 
+    { 
+        return maybe_fail(ec);
     }
 
 public:
@@ -270,15 +349,44 @@ public:
 
     explicit
     fail_parser(
-        std::size_t n)
-        : n_(n)
+        std::size_t n,
+        parse_options po = parse_options())
+        :  basic_parser(po), n_(n)
     {
     }
 
-    void
-    reset()
+    explicit
+    fail_parser(parse_options po)
+        : basic_parser(po)
     {
-        basic_parser::reset();
+    }
+
+    using basic_parser::reset;
+
+    std::size_t
+    write_some(
+        bool more,
+        char const* data,
+        std::size_t size,
+        error_code& ec)
+    {
+        return basic_parser::write_some(
+            *this, more, data, size, ec);
+    }
+
+    std::size_t
+    write(
+        bool more,
+        char const* data,
+        std::size_t size,
+        error_code& ec)
+    {
+        auto const n = 
+            basic_parser::write_some(
+                *this, more, data, size, ec);
+        if(! ec && n < size)
+            ec = error::extra_data;
+        return n;
     }
 };
 
@@ -295,129 +403,156 @@ struct test_exception
 };
 
 // Exercises every exception path
-class throw_parser
-    : public basic_parser
+class throw_parser : public basic_parser
 {
+    friend class basic_parser;
     std::size_t n_ = std::size_t(-1);
 
-    void
+    bool
     maybe_throw()
     {
         if(n_ && --n_ > 0)
-            return;
+            return true;
         throw test_exception{};
     }
 
-    void
+    bool
     on_document_begin(
-        error_code&) override
+        error_code&)
     {
-        maybe_throw();
+        return maybe_throw();
     }
 
-    void
+    bool
     on_document_end(
-        error_code&) override
+        error_code&)
     {
-        maybe_throw();
+        return maybe_throw();
     }
 
-    void
+    bool
     on_object_begin(
-        error_code&) override
+        error_code&)
     {
-        maybe_throw();
+        return maybe_throw();
     }
 
-    void
+    bool
     on_object_end(
-        error_code&) override
+        error_code&)
     {
-        maybe_throw();
+        return maybe_throw();
     }
 
-    void
+    bool
     on_array_begin(
-        error_code&) override
+        error_code&)
     {
-        maybe_throw();
+        return maybe_throw();
     }
 
-    void
+    bool
     on_array_end(
-        error_code&) override
+        error_code&)
     {
-        maybe_throw();
+        return maybe_throw();
     }
 
-    void
+    bool
     on_key_part(
         string_view,
-        error_code&) override
+        error_code&)
     {
-        maybe_throw();
+        return maybe_throw();
     }
 
-    void
+    bool
     on_key(
         string_view,
-        error_code&) override
+        error_code&)
     {
-        maybe_throw();
+        return maybe_throw();
     }
         
-    void
+    bool
     on_string_part(
         string_view,
-        error_code&) override
+        error_code&)
     {
-        maybe_throw();
+        return maybe_throw();
     }
 
-    void
+    bool
     on_string(
         string_view,
-        error_code&) override
+        error_code&)
     {
-        maybe_throw();
+        return maybe_throw();
     }
 
-    void
+    bool
+    on_number_part(
+        string_view,
+        error_code&)
+    {
+        return maybe_throw();
+    }
+
+    bool
     on_int64(
         int64_t,
-        error_code&) override
+        string_view,
+        error_code&)
     {
-        maybe_throw();
+        return maybe_throw();
     }
 
-    void
+    bool
     on_uint64(
         uint64_t,
-        error_code&) override
+        string_view,
+        error_code&)
     {
-        maybe_throw();
+        return maybe_throw();
     }
 
-    void
+    bool
     on_double(
         double,
-        error_code&) override
+        string_view,
+        error_code&)
     {
-        maybe_throw();
+        return maybe_throw();
     }
 
-    void
+    bool
     on_bool(
         bool,
-        error_code&) override
+        error_code&)
     {
-        maybe_throw();
+        return maybe_throw();
     }
 
-    void
-    on_null(error_code&) override
+    bool
+    on_null(error_code&)
     {
-        maybe_throw();
+        return maybe_throw();
+    }
+
+    bool 
+    on_comment_part(
+        string_view, 
+        error_code&) 
+    { 
+        return maybe_throw(); 
+    }
+    
+    bool
+    on_comment(
+        string_view, 
+        error_code&) 
+    { 
+        return maybe_throw();
     }
 
 public:
@@ -425,9 +560,33 @@ public:
 
     explicit
     throw_parser(
-        std::size_t n)
-        : n_(n)
+        std::size_t n,
+        parse_options po = parse_options())
+        : basic_parser(po), n_(n)
     {
+    }
+
+    explicit
+    throw_parser(parse_options po)
+        : basic_parser(po)
+    {
+    }
+
+    using basic_parser::reset;
+
+    std::size_t
+    write(
+        bool more,
+        char const* data,
+        std::size_t size,
+        error_code& ec)
+    {
+        auto const n =
+            basic_parser::write_some(
+                *this, more, data, size, ec);
+        if(! ec && n < size)
+            ec = error::extra_data;
+        return n;
     }
 };
 
@@ -438,7 +597,6 @@ template<class FwdIt>
 class input_iterator
 {
     FwdIt it_;
-
 
 public:
     using value_type = typename std::iterator_traits<FwdIt>::value_type;
@@ -577,7 +735,7 @@ check_storage(
     object const& o,
     storage_ptr const& sp)
 {
-    BEAST_EXPECT(equal_storage(o, sp));
+    BOOST_TEST(equal_storage(o, sp));
 }
 
 inline
@@ -586,7 +744,7 @@ check_storage(
     array const& a,
     storage_ptr const& sp)
 {
-    BEAST_EXPECT(equal_storage(a, sp));
+    BOOST_TEST(equal_storage(a, sp));
 }
 
 inline
@@ -595,7 +753,7 @@ check_storage(
     value const& v,
     storage_ptr const& sp)
 {
-    BEAST_EXPECT(equal_storage(v, sp));
+    BOOST_TEST(equal_storage(v, sp));
 }
 
 //----------------------------------------------------------
@@ -675,7 +833,7 @@ to_string_test(
         auto const n =
             detail::format_int64(
                 buf, jv.as_int64());
-        dest.append(buf, n);
+        dest.append(string_view(buf).substr(0, n));
         break;
     }
 
@@ -685,7 +843,7 @@ to_string_test(
         auto const n =
             detail::format_uint64(
                 buf, jv.as_uint64());
-        dest.append(buf, n);
+        dest.append(string_view(buf).substr(0, n));
         break;
     }
 
@@ -695,7 +853,7 @@ to_string_test(
         auto const n =
             detail::format_double(
                 buf, jv.as_double());
-        dest.append(buf, n);
+        dest.append(string_view(buf).substr(0, n));
         break;
     }
 
@@ -816,6 +974,60 @@ equal(
 
     return false;
 }
+
+//----------------------------------------------------------
+
+namespace detail {
+
+inline
+void
+check_array_impl(int, value const&)
+{
+}
+
+template<class Arg>
+void
+check_array_impl(
+    int i, value const& jv,
+    Arg const& arg)
+{
+    BOOST_TEST(equal(jv.at(i), arg));
+}
+
+template<
+    class Arg0,
+    class Arg1,
+    class... Argn>
+void
+check_array_impl(
+    int i, value const& jv,
+    Arg0 const& arg0,
+    Arg1 const& arg1,
+    Argn const&... argn)
+{
+    BOOST_TEST(equal(jv.at(i), arg0));
+    BOOST_TEST(equal(jv.at(i + 1), arg1));
+    check_array_impl(i + 2, jv, argn...);
+}
+
+} // detail
+
+template<class... Argn>
+static
+void
+check_array(
+    value const& jv,
+    Argn const&... argn)
+{
+    if(! BOOST_TEST(jv.is_array()))
+        return;
+    if(! BOOST_TEST(sizeof...(argn) ==
+        jv.get_array().size()))
+        return;
+    detail::check_array_impl(0, jv, argn...);
+}
+
+//----------------------------------------------------------
 
 } // json
 } // boost

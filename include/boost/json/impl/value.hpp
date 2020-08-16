@@ -4,14 +4,13 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/vinniefalco/json
+// Official repository: https://github.com/cppalliance/json
 //
 
 #ifndef BOOST_JSON_IMPL_VALUE_HPP
 #define BOOST_JSON_IMPL_VALUE_HPP
 
-#include <boost/json/error.hpp>
-#include <boost/json/detail/except.hpp>
+#include <boost/json/except.hpp>
 #include <cstring>
 #include <limits>
 #include <type_traits>
@@ -49,90 +48,6 @@ struct value::undo
             relocate(self, saved);
     }
 };
-
-//----------------------------------------------------------
-
-namespace detail {
-
-template<class T, class = void>
-struct is_range : std::false_type
-{
-};
-
-template<class T>
-struct is_range<T, void_t<
-    typename T::value_type,
-    decltype(
-        std::declval<T const&>().begin(),
-        std::declval<T const&>().end()
-    )>> : std::true_type
-{
-};
-
-} // detail
-
-//----------------------------------------------------------
-//
-// assign to value
-//
-
-#if 0
-// range
-template<class T
-    ,class = typename std::enable_if<
-        detail::is_range<T>::value
-        && ! std::is_same<T, typename object::value_type>::value
-        && ! std::is_same<typename T::value_type, char>::value
-        && has_to_json<typename T::value_type>::value
-            >::type
->
-void
-to_json(T const& t, value& v)
-{
-    array arr(v.storage());
-    for(auto const& e : t)
-        arr.emplace_back(e);
-    v = std::move(arr);
-}
-#endif
-
-//----------------------------------------------------------
-//
-// assign value to
-//
-
-// integer
-
-template<typename T
-    ,class = typename std::enable_if<
-        std::is_integral<T>::value>::type
->
-void
-from_json(T& t, value const& v)
-{
-    if(v.is_int64())
-    {
-        auto const rhs = v.as_int64();
-        if( rhs > (std::numeric_limits<T>::max)() ||
-            rhs < (std::numeric_limits<T>::min)())
-            BOOST_THROW_EXCEPTION(system_error(
-                error::integer_overflow));
-        t = static_cast<T>(rhs);
-    }
-    else if(v.is_uint64())
-    {
-        auto const rhs = v.as_uint64();
-        if(rhs > (std::numeric_limits<T>::max)())
-            BOOST_THROW_EXCEPTION(system_error(
-                error::integer_overflow));
-        t = static_cast<T>(rhs);
-    }
-    else
-    {
-        BOOST_THROW_EXCEPTION(
-            system_error(error::not_number));
-    }
-}
 
 //----------------------------------------------------------
 
@@ -176,19 +91,28 @@ relocate(
 
 //----------------------------------------------------------
 
+inline
+std::uint32_t
+key_value_pair::
+key_size(std::size_t n)
+{
+    if(n > BOOST_JSON_MAX_STRING_SIZE)
+        string_too_large::raise();
+    return static_cast<
+        std::uint32_t>(n);
+}
+
 template<class... Args>
 key_value_pair::
 key_value_pair(
     string_view key,
     Args&&... args)
     : value_(std::forward<Args>(args)...)
-    , len_(key.size())
     , key_(
         [&]
         {
             if(key.size() > string::max_size())
-                BOOST_THROW_EXCEPTION(
-                    detail::key_too_large_exception());
+                key_too_large::raise();
             auto s = reinterpret_cast<
                 char*>(value_.storage()->
                     allocate(key.size() + 1));
@@ -196,6 +120,7 @@ key_value_pair(
             s[key.size()] = 0;
             return s;
         }())
+    , len_(key_size(key.size()))
 {
 }
 

@@ -11,17 +11,20 @@
 #include <boost/json/serializer.hpp>
 
 #include <boost/json/parser.hpp>
-#include <boost/beast/_experimental/unit_test/suite.hpp>
+#include <iostream>
+
 #include "parse-vectors.hpp"
 #include "test.hpp"
-#include <iostream>
+#include "test_suite.hpp"
 
 namespace boost {
 namespace json {
 
-class serializer_test : public beast::unit_test::suite
+class serializer_test
 {
 public:
+    ::test_suite::log_type log;
+
     void
     grind_one(
         string_view s,
@@ -32,7 +35,7 @@ public:
             error_code ec;
             auto const s1 = to_string(jv);
             auto const jv2 = parse(s1, ec);
-            if(! BEAST_EXPECT(equal(jv, jv2)))
+            if(! BOOST_TEST(equal(jv, jv2)))
             {
                 if(name.empty())
                     log <<
@@ -58,7 +61,7 @@ public:
 
             auto const s1 = to_string(jv);
             auto const jv2 = parse(s1, ec);
-            BEAST_EXPECT(equal(jv, jv2));
+            BOOST_TEST(equal(jv, jv2));
         }
     }
 
@@ -94,7 +97,7 @@ public:
                         " " << s1 << "\n"
                         " " << s2 << std::endl;
             };
-            if(! BEAST_EXPECT(
+            if(! BOOST_TEST(
                 s2.size() == i))
             {
                 dump();
@@ -103,13 +106,13 @@ public:
             s2.grow(sr.read(
                 s2.data() + i,
                 s1.size() - i));
-            if(! BEAST_EXPECT(
+            if(! BOOST_TEST(
                 s2.size() == s1.size()))
             {
                 dump();
                 break;
             }
-            if(! BEAST_EXPECT(s2 == s1))
+            if(! BOOST_TEST(s2 == s1))
             {
                 dump();
                 break;
@@ -117,78 +120,19 @@ public:
         }
     }
 
+    //------------------------------------------------------
+
     void
-    testMembers()
+    testNull()
     {
-        value jv;
-
-        // serializer()
-        {
-            serializer sr;
-        }
-
-        // serializer(value)
-        {
-            serializer sr(jv);
-        }
-
-        // is_done()
-        {
-            serializer sr(jv);
-            BEAST_EXPECT(! sr.is_done());
-        }
-
-        // read()
-        {
-            {
-                serializer sr(jv);
-                char buf[1024];
-                auto n = sr.read(
-                    buf, sizeof(buf));
-                BEAST_EXPECT(sr.is_done());
-                BEAST_EXPECT(string_view(
-                    buf, n) == "null");
-            }
-
-            {
-                char buf[32];
-                serializer sr;
-                BEAST_THROWS(
-                    sr.read(buf, sizeof(buf)),
-                    std::logic_error);
-            }
-        }
+        check("null");
     }
 
     void
-    check(
-        string_view s,
-        string_view name = {})
+    testBoolean()
     {
-        auto const jv = parse(s);
-        grind(s, jv, name);
-    }
-
-    void
-    testObject()
-    {
-        check("{}");
-        check("{\"x\":1}");
-        check("{\"x\":[]}");
-        check("{\"x\":1,\"y\":null}");
-    }
-
-    void
-    testArray()
-    {
-        check("[]");
-        check("[[]]");
-        check("[[],[],[]]");
-        check("[[[[[[[[[[]]]]]]]]]]");
-        check("[{}]");
-        check("[{},{}]");
-        check("[1,2,3,4,5]");
-        check("[true,false,null]");
+        check("true");
+        check("false");
     }
 
     void
@@ -270,6 +214,8 @@ public:
         check("-999");
         check("-99");
         check("-9");
+        check("-0");
+        check("-0.0");
         check( "0");
         check( "9");
         check( "99");
@@ -367,11 +313,86 @@ public:
     }
 
     void
-    testScalar()
+    testArray()
     {
-        check("true");
-        check("false");
-        check("null");
+        check("[]");
+        check("[[]]");
+        check("[[],[],[]]");
+        check("[[[[[[[[[[]]]]]]]]]]");
+        check("[{}]");
+        check("[{},{}]");
+        check("[1,2,3,4,5]");
+        check("[true,false,null]");
+    }
+
+    void
+    testObject()
+    {
+        check("{}");
+        check("{\"x\":1}");
+        check("{\"x\":[]}");
+        check("{\"x\":1,\"y\":null}");
+    }
+
+    //------------------------------------------------------
+
+    void
+    testMembers()
+    {
+        value jv;
+
+        // serializer()
+        {
+            serializer sr;
+        }
+
+        // serializer(value)
+        {
+            serializer sr(jv);
+        }
+
+        // is_done()
+        {
+            serializer sr(jv);
+            BOOST_TEST(! sr.is_done());
+        }
+
+        // read()
+        {
+            {
+                serializer sr(jv);
+                char buf[1024];
+                auto n = sr.read(
+                    buf, sizeof(buf));
+                BOOST_TEST(sr.is_done());
+                BOOST_TEST(string_view(
+                    buf, n) == "null");
+            }
+
+            {
+                char buf[32];
+                serializer sr;
+                BOOST_TEST_THROWS(
+                    sr.read(buf, sizeof(buf)),
+                    std::logic_error);
+            }
+        }
+    }
+
+    void
+    check(
+        string_view s,
+        string_view name = {})
+    {
+        try
+        {
+            auto const jv = parse(s);
+            grind(s, jv, name);
+        }
+        catch(std::exception const&)
+        {
+            BOOST_TEST_FAIL();
+        }
     }
 
     void
@@ -443,15 +464,13 @@ public:
         {
             error_code ec;
             auto const jv1 = parse(js, ec);
-            if(! BEAST_EXPECTS(! ec,
-                ec.message()))
+            if(! BOOST_TEST(! ec))
                 return;
             auto const jv2 =
                 parse(to_ostream(jv1), ec);
-            if(! BEAST_EXPECTS(! ec,
-                ec.message()))
+            if(! BOOST_TEST(! ec))
                 return;
-            if(! BEAST_EXPECT(equal(jv1, jv2)))
+            if(! BOOST_TEST(equal(jv1, jv2)))
                 log <<
                     " " << js << "\n"
                     " " << jv1 << "\n"
@@ -461,20 +480,38 @@ public:
     }
 
     void
+    testNumberRoundTrips()
+    {
+        BOOST_TEST(std::signbit(parse("-0.0").as_double()));
+        BOOST_TEST(to_string(value(-0.0)) == "-0E0");
+
+        //BOOST_TEST(parse("-0.0").as_double() == -0);
+        //BOOST_TEST(parse("-0").as_int64() == 0);
+        //BOOST_TEST(to_string(parse("0.0")) == "0");
+        //BOOST_TEST(to_string(parse("-0.0")) == "-0.0");
+
+        // VFALCO Peter is unsure what this should do
+        //BOOST_TEST(to_string(parse("-0")) == "-0");
+    }
+
+    void
     run()
     {
-        testMembers();
-        testObject();
-        testArray();
+        testNull();
+        testBoolean();
         testString();
         testNumber();
-        testScalar();
+        testArray();
+        testObject();
+
+        testMembers();
         testVectors();
         testOstream();
+        testNumberRoundTrips();
     }
 };
 
-BEAST_DEFINE_TESTSUITE(boost,json,serializer);
+TEST_SUITE(serializer_test, "boost.json.serializer");
 
 } // json
 } // boost

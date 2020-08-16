@@ -4,13 +4,14 @@
 // Distributed under the Boost Software License, Version 1.0. (See accompanying
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
-// Official repository: https://github.com/vinniefalco/json
+// Official repository: https://github.com/cppalliance/json
 //
 
 #ifndef BOOST_JSON_DETAIL_BUFFER_HPP
 #define BOOST_JSON_DETAIL_BUFFER_HPP
 
-#include <boost/json/config.hpp>
+#include <boost/json/detail/config.hpp>
+#include <boost/json/string_view.hpp>
 #include <cstring>
 
 namespace boost {
@@ -18,16 +19,19 @@ namespace json {
 namespace detail {
 
 // A simple string-like temporary static buffer
-template<unsigned long N>
+template<std::size_t N>
 class buffer
 {
-    char buf_[N];
-    unsigned int size_ = 0;
-
 public:
-    using size_type = unsigned int;
+    using size_type = std::size_t;
 
     buffer() = default;
+
+    bool
+    empty() const noexcept
+    {
+        return size_ == 0;
+    }
 
     string_view
     get() const noexcept
@@ -53,6 +57,12 @@ public:
     }
 
     size_type
+    capacity() const noexcept
+    {
+        return N - size_;
+    }
+
+    size_type
     max_size() const noexcept
     {
         return N;
@@ -67,17 +77,19 @@ public:
     void
     push_back(char ch) noexcept
     {
-        BOOST_ASSERT(size_ <= N - 1);
+        BOOST_ASSERT(capacity() > 0);
         buf_[size_++] = ch;
     }
 
-    // returns true if cp is a valid utf-32 code point
-    static
-    bool
-    is_valid(unsigned long cp) noexcept
+    // append an unescaped string
+    void
+    append(
+        char const* s,
+        size_type n)
     {
-        return cp <= 0x0010ffffu &&
-            (cp < 0xd800u || cp > 0xdfffu);
+        BOOST_ASSERT(n <= N - size_);
+        std::memcpy(buf_ + size_, s, n);
+        size_ += n;
     }
 
     // append valid 32-bit code point as utf8
@@ -122,6 +134,9 @@ public:
             size_ += 4;
         }
     }
+private:
+    char buf_[N];
+    size_type size_ = 0;
 };
 
 } // detail
