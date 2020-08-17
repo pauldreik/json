@@ -1,0 +1,24 @@
+name: fuzz
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "25 */12 * * *"
+  workflow_dispatch:
+
+jobs:
+  fuzz:
+
+    runs-on: ubuntu-latest
+    
+    steps:       
+    - uses: actions/checkout@v2
+    - name: build
+      run: ./build.sh
+      working-directory: fuzzing/
+    - name: Save the corpus as a github artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: corpus
+        path: cmin
