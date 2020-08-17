@@ -8,7 +8,7 @@
 # By Paul Dreik 2019 for the boost json project
 # License: Boost 1.0
 
-set -e
+set -ex
 
 fuzzdir=$(dirname $0)
 me=$(basename $0)
@@ -51,6 +51,9 @@ if [ ! -e $fuzzer -o $srcfile -nt $fuzzer ] ; then
 	$srcfile
 fi
 
+# make sure ubsan stops in case anything is found
+export UBSAN_OPTIONS="halt_on_error=1"
+
 # make sure the old crashes pass without problems
 find old_crashes -type f -print0 |xargs -0 $fuzzer
 
@@ -61,14 +64,22 @@ if [ ! -d $seedcorpus ] ; then
     find ../test -name "*.json" -type f -print0 |xargs -0 cp -f -t $seedcorpus/
 fi
 
-# run the fuzzer for a short while
-if [ ! -d out ] ; then
-    mkdir -p out
-    $fuzzer out/ $seedcorpus/ -max_total_time=30
+# if an old corpus exists, use it
+# get it with curl -O --location -J https://bintray.com/pauldreik/boost.json/download_file?file_path=corpus%2Fcorpus.tar
+if [ -e corpus.tar ] ; then
+  mkdir -p oldcorpus
+  tar xf corpus.tar -C oldcorpus
+  OLDCORPUS=oldcorpus/cmin
+else
+  OLDCORPUS=
 fi
 
+
+# run the fuzzer for a short while
+mkdir -p out
+$fuzzer out/ $OLDCORPUS $seedcorpus/ -max_total_time=30
+
 # minimize the corpus
-if [ ! -d cmin ] ; then
-    mkdir -p cmin
-    $fuzzer cmin/ out/ $seedcorpus/ -merge=1
-fi
+mkdir -p cmin
+$fuzzer cmin/ $OLDCORPUS out/ $seedcorpus/ -merge=1
+
