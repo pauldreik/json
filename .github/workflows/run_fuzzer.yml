@@ -20,15 +20,16 @@ jobs:
     - name: build and run
       run: ./fuzz.sh
       working-directory: fuzzing/
-    - name: Save the corpus as a github artifact
-      uses: actions/upload-artifact@v2
-      with:
-        name: corpus
-        path: fuzzing/cmin
     - name: Upload the corpus to bintray
       working-directory: fuzzing/
       run: |
         echo uploading each artifact twice, otherwise it will not be published
-        tar cf corpus.tar cmin
+        tar cf - cmin > corpus.tar
         curl -T corpus.tar -upauldreik:${{ secrets.bintrayApiKey }} https://api.bintray.com/content/pauldreik/boost.json/corpus/0/corpus/corpus.tar";publish=1;override=1"
         curl -T corpus.tar -upauldreik:${{ secrets.bintrayApiKey }} https://api.bintray.com/content/pauldreik/boost.json/corpus/0/corpus/corpus.tar";publish=1;override=1"
+    - name: Save the corpus as a github artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: corpus
+        path: fuzzing/corpus.tar
+
