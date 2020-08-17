@@ -1,19 +1,24 @@
-name: C/C++ CI
+name: fuzz
 
-on: [push]
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "25 */12 * * *"
+  workflow_dispatch:
 
 jobs:
-  build:
+  fuzz:
 
     runs-on: ubuntu-latest
     
-    steps:
-    - uses: actions/checkout@v1
-    - name: configure
-      run: ./configure
-    - name: make
-      run: make
-    - name: make check
-      run: make check
-    - name: make distcheck
-      run: make distcheck
+    steps:       
+    - uses: actions/checkout@v2
+    - name: build
+      run: ./build.sh
+      working-directory: fuzzing/
+    - name: Save the corpus as a github artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: corpus
+        path: cmin
