@@ -14,8 +14,11 @@ jobs:
     
     steps:       
     - uses: actions/checkout@v2
-    - name: build
-      run: ./build.sh
+    - name: download old corpus
+      run: curl -O --location -J https://bintray.com/pauldreik/boost.json/download_file?file_path=corpus%2Fcorpus.tar
+      working-directory: fuzzing/
+    - name: build and run
+      run: ./fuzz.sh
       working-directory: fuzzing/
     - name: Save the corpus as a github artifact
       uses: actions/upload-artifact@v2
