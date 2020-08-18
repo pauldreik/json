@@ -30,7 +30,7 @@ if ! which $CLANG >/dev/null; then
 	exit 1
     fi
 fi
-echo $me: will use clang $CLANG
+echo "$me: will use this compiler: $CLANG"
 
 srcfile=fuzzer.cpp
 fuzzer=./fuzzer
