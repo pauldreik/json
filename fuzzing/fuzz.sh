@@ -32,7 +32,7 @@ if ! which $CLANG >/dev/null; then
 fi
 echo "$me: will use this compiler: $CLANG"
 
-srcfile=fuzzer.cpp
+srcfile=fuzz_parse.cpp
 fuzzer=./fuzzer
 
 if [ ! -e $fuzzer -o $srcfile -nt $fuzzer ] ; then
