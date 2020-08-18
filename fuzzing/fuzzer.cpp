@@ -90,7 +90,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
 {
 try {
     validate(std::string_view{reinterpret_cast<const char*>(data), size});
-} catch (...) {}
+} catch (...) {
+}
     return 0;
 }
 

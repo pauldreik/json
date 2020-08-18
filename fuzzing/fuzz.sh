@@ -1,14 +1,13 @@
 #!/bin/sh
-
 #
 # builds the fuzzers, runs old crashes etc
 #
 # Optional: set environment variable CLANG, otherwise clang is auto detected.
 #
-# By Paul Dreik 2019 for the boost json project
+# By Paul Dreik 2019-2020 for the boost json project
 # License: Boost 1.0
 
-set -ex
+set -e
 
 fuzzdir=$(dirname $0)
 me=$(basename $0)
