@@ -32,31 +32,35 @@ validate( string_view s )
 {
     // The null parser discards all the data
 
-    class null_parser : public basic_parser
+    class null_parser
     {
-        friend class boost::json::basic_parser;
+        struct handler
+        {
+            bool on_document_begin( error_code& ) { return true; }
+            bool on_document_end( error_code& ) { return true; }
+            bool on_object_begin( error_code& ) { return true; }
+            bool on_object_end( error_code& ) { return true; }
+            bool on_array_begin( error_code& ) { return true; }
+            bool on_array_end( error_code& ) { return true; }
+            bool on_key_part( string_view, error_code& ) { return true; }
+            bool on_key( string_view, error_code& ) { return true; }
+            bool on_string_part( string_view, error_code& ) { return true; }
+            bool on_string( string_view, error_code& ) { return true; }
+            bool on_number_part( string_view, error_code& ) { return true; }
+            bool on_int64( std::int64_t, string_view, error_code& ) { return true; }
+            bool on_uint64( std::uint64_t, string_view, error_code& ) { return true; }
+            bool on_double( double, string_view, error_code& ) { return true; }
+            bool on_bool( bool, error_code& ) { return true; }
+            bool on_null( error_code& ) { return true; }
+            bool on_comment_part(string_view, error_code&) { return true; }
+            bool on_comment(string_view, error_code&) { return true; }
+        };
+
+        basic_parser<handler> p_;
 
     public:
         null_parser() {}
         ~null_parser() {}
-        bool on_document_begin( error_code& ) { return true; }
-        bool on_document_end( error_code& ) { return true; }
-        bool on_object_begin( error_code& ) { return true; }
-        bool on_object_end( error_code& ) { return true; }
-        bool on_array_begin( error_code& ) { return true; }
-        bool on_array_end( error_code& ) { return true; }
-        bool on_key_part( string_view, error_code& ) { return true; }
-        bool on_key( string_view, error_code& ) { return true; }
-        bool on_string_part( string_view, error_code& ) { return true; }
-        bool on_string( string_view, error_code& ) { return true; }
-        bool on_number_part( string_view, error_code& ) { return true; }
-        bool on_int64( std::int64_t, string_view, error_code& ) { return true; }
-        bool on_uint64( std::uint64_t, string_view, error_code& ) { return true; }
-        bool on_double( double, string_view, error_code& ) { return true; }
-        bool on_bool( bool, error_code& ) { return true; }
-        bool on_null( error_code& ) { return true; }
-        bool on_comment_part(string_view, error_code&) { return true; }
-        bool on_comment(string_view, error_code&) { return true; }
         
         std::size_t
         write(
@@ -64,9 +68,7 @@ validate( string_view s )
             std::size_t size,
             error_code& ec)
         {
-            auto const n =
-                basic_parser::write_some(
-                *this, false, data, size, ec);
+            auto const n = p_.write_some( false, data, size, ec );
             if(! ec && n < size)
                 ec = error::extra_data;
             return n;
@@ -85,6 +87,7 @@ validate( string_view s )
 }
 
 //]
+
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
 {
