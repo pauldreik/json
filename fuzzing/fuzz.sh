@@ -58,13 +58,15 @@ fi
 export UBSAN_OPTIONS="halt_on_error=1"
 
 # make sure the old crashes pass without problems
-find old_crashes -type f -print0 |xargs -0 $fuzzer
+if [ -d old_crashes/$variant ]; then
+  find old_crashes/$variant -type f -print0 |xargs -0 --no-run-if-empty $fuzzer
+fi
 
 # make an initial corpus from the test data already in the repo
-seedcorpus=seedcorpus
+seedcorpus=seedcorpus/$variant
 if [ ! -d $seedcorpus ] ; then
-    mkdir $seedcorpus
-    find ../test -name "*.json" -type f -print0 |xargs -0 cp -f -t $seedcorpus/
+    mkdir -p $seedcorpus
+    find ../test -name "*.json" -type f -print0 |xargs -0 --no-run-if-empty cp -f -t $seedcorpus/
 fi
 
 # if an old corpus exists, use it
