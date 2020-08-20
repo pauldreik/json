@@ -75,6 +75,8 @@ if [ -e corpus.tar ] ; then
   mkdir -p oldcorpus
   tar xf corpus.tar -C oldcorpus
   OLDCORPUS=oldcorpus/cmin/$variant
+  # in case the old corpus did not have this variant (when adding/renaming a new fuzzer)
+  mkdir -p $OLDCORPUS
 else
   OLDCORPUS=
 fi
