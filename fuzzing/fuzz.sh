@@ -32,8 +32,12 @@ if ! which $CLANG >/dev/null; then
 fi
 echo "$me: will use this compiler: $CLANG"
 
-srcfile=fuzz_basic_parser.cpp
-fuzzer=./fuzzer
+variants="basic_parser parse parser"
+
+for variant in $variants; do
+
+srcfile=fuzz_$variant.cpp
+fuzzer=./fuzzer_$variant
 
 if [ ! -e $fuzzer -o $srcfile -nt $fuzzer ] ; then
     
@@ -68,17 +72,19 @@ fi
 if [ -e corpus.tar ] ; then
   mkdir -p oldcorpus
   tar xf corpus.tar -C oldcorpus
-  OLDCORPUS=oldcorpus/cmin
+  OLDCORPUS=oldcorpus/cmin/$variant
 else
   OLDCORPUS=
 fi
 
 
 # run the fuzzer for a short while
-mkdir -p out
-$fuzzer out/ $OLDCORPUS $seedcorpus/ -max_total_time=30
+mkdir -p out/$variant
+$fuzzer out/$variant $OLDCORPUS $seedcorpus/ -max_total_time=30
 
 # minimize the corpus
-mkdir -p cmin
-$fuzzer cmin/ $OLDCORPUS out/ $seedcorpus/ -merge=1
+mkdir -p cmin/$variant
+$fuzzer cmin/$variant $OLDCORPUS out/$variant $seedcorpus/ -merge=1
+
+done
 

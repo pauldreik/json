@@ -25,7 +25,7 @@ parser p;
 error_code ec;
 
 // This must be called once before parsing every new JSON
-p.start();
+p.reset();
 
 // Write the first part of the buffer
 p.write( sv.data(), sv.size(), ec);
