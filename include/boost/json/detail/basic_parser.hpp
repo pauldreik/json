@@ -25,8 +25,7 @@
     This file is in the detail namespace because it
     is not allowed to be included directly by users,
     who should be including <boost/json/basic_parser.hpp>
-    instead, which provides the member function template
-    definitions.
+    instead, which provides the member function definitions.
 
     The source code is arranged this way to keep compile
     times down.
@@ -77,16 +76,35 @@ namespace json {
 
     @see @ref parse, @ref parser
 */
+template<class Handler>
 class basic_parser
 {
-    enum class state : char;
-    using const_stream = detail::const_stream;
-
-    enum result
+    enum class state : char
     {
-        ok = 0,
-        fail,
-        partial
+        doc1,  doc2,  doc3, doc4,
+        com1,  com2,  com3,
+        com4,  com5,
+        nul1,  nul2,  nul3,
+        tru1,  tru2,  tru3,
+        fal1,  fal2,  fal3,  fal4,
+        str1,  str2,  str3,  str4,
+        str5,  str6,  str7,
+        sur1,  sur2,  sur3,
+        sur4,  sur5,  sur6,
+        utf1,  utf2,  utf3, 
+        utf4,  utf5,  utf6,
+        utf7,  utf8,  utf9, 
+        utf10, utf11, utf12, 
+        utf13, utf14, utf15, 
+        utf16, utf17, utf18,
+        obj1,  obj2,  obj3,  obj4,
+        obj5,  obj6,  obj7,  obj8,
+        obj9,  obj10, obj11,
+        arr1,  arr2,  arr3,  
+        arr4,  arr5,  arr6,
+        num1,  num2,  num3,  num4,
+        num5,  num6,  num7,  num8,
+        exp1,  exp2,  exp3
     };
 
     struct number
@@ -98,95 +116,167 @@ class basic_parser
         bool neg;
     };
 
+    // optimization: must come first
+    Handler h_;
+
     number num_;
     error_code ec_;
     detail::stack st_;
-    std::size_t depth_ = 0;
     std::size_t max_depth_ = 32;
+    // how many levels deeper the parser can go
+    std::size_t depth_ = max_depth_;
     unsigned u1_;
     unsigned u2_;
     bool more_; // false for final buffer
     bool complete_ = false; // true on complete parse
     bool is_key_;
+    const char* end_;
     parse_options opt_;
 
     inline static bool is_control(char c) noexcept;
     inline static char hex_digit(char c) noexcept;
+    
     inline void reserve();
-    inline void suspend(state st);
-    inline void suspend(state st, number const& num);
-    inline bool skip_white(const_stream& cs);
+    inline const char* canary();
+    inline bool incomplete(
+        const detail::const_stream_wrapper& cs);
 
-    template<class Handler>
-    result syntax_error(Handler&, const_stream&);
+    BOOST_NOINLINE
+    inline
+    const char*
+    suspend_or_fail(state st);
 
-    template<bool StackEmpty, bool ReturnValue,
+    BOOST_NOINLINE
+    inline
+    const char*
+    fail(const char* p) noexcept;
+
+    BOOST_NOINLINE
+    inline
+    const char*
+    fail(
+        const char* p, 
+        error ev) noexcept;
+
+    BOOST_NOINLINE
+    inline
+    const char*
+    maybe_suspend(
+        const char* p, 
+        state st);
+
+    BOOST_NOINLINE
+    inline
+    const char*
+    maybe_suspend(
+        const char* p,
+        state st,
+        const number& num);
+
+    BOOST_NOINLINE
+    inline
+    const char*
+    suspend(
+        const char* p,
+        state st);
+
+    BOOST_NOINLINE
+    inline
+    const char*
+    suspend(
+        const char* p,
+        state st,
+        const number& num);
+
+    BOOST_NOINLINE
+    inline
+    const char*
+    syntax_error(const char* p);
+
+    template<
+        bool StackEmpty, bool ReturnValue,
         bool Terminal, bool AllowTrailing, 
-        bool AllowBadUTF8, class Handler>
-    result parse_comment(Handler& h, const_stream& cs);
+        bool AllowBadUTF8>
+    const char* parse_comment(const char* p);
     
     template<bool StackEmpty>
-    result validate_utf8(const_stream& cs);
+    const char* validate_utf8(const char* p, const char* end);
 
-    template<bool StackEmpty, class Handler>
-    result parse_document(Handler& h, const_stream& cs);
+    template<bool StackEmpty>
+    const char* parse_document(const char* p);
     
     template<bool StackEmpty, bool AllowComments,
-        bool AllowTrailing, bool AllowBadUTF8, class Handler>
-    result parse_value(Handler& h, const_stream& cs);
+        bool AllowTrailing, bool AllowBadUTF8>
+    const char* parse_value(const char* p);
     
     template<bool StackEmpty, bool AllowComments,
-        bool AllowTrailing, bool AllowBadUTF8, class Handler>
-    result resume_value(Handler& h, const_stream& cs);
+        bool AllowTrailing, bool AllowBadUTF8>
+    const char* resume_value(const char* p);
     
     template<bool StackEmpty, bool AllowComments,
-        bool AllowTrailing, bool AllowBadUTF8, class Handler>
-    result parse_object(Handler& h, const_stream& cs);
+        bool AllowTrailing, bool AllowBadUTF8>
+    const char* parse_object(const char* p);
     
     template<bool StackEmpty, bool AllowComments,
-        bool AllowTrailing, bool AllowBadUTF8, class Handler>
-    result parse_array(Handler& h, const_stream& cs);
+        bool AllowTrailing, bool AllowBadUTF8>
+    const char* parse_array(const char* p);
     
-    template<bool StackEmpty, class Handler>
-    result parse_null(Handler& h, const_stream& cs);
+    template<bool StackEmpty>
+    const char* parse_null(const char* p);
     
-    template<bool StackEmpty, class Handler>
-    result parse_true(Handler& h, const_stream& cs);
+    template<bool StackEmpty>
+    const char* parse_true(const char* p);
     
-    template<bool StackEmpty, class Handler>
-    result parse_false(Handler& h, const_stream& cs);
+    template<bool StackEmpty>
+    const char* parse_false(const char* p);
     
-    template<bool StackEmpty, bool AllowBadUTF8, class Handler>
-    result parse_string(Handler& h, const_stream& cs);
+    template<bool StackEmpty, bool AllowBadUTF8>
+    const char* parse_string(const char* p);
     
-    template<bool StackEmpty, char First, class Handler>
-    result parse_number(Handler& h, const_stream& cs);
+    template<bool StackEmpty, char First>
+    const char* parse_number(const char* p);
 
 public:
-     /** Default constructor.
+    /** Destructor.
+
+        All dynamically allocated internal memory is freed.
+    */
+    ~basic_parser() = default;
+
+    /** Constructor.
         
         The parser will only recognize strict JSON.
     */
-    basic_parser() noexcept = default;
+    basic_parser() = default;
 
     /** Constructor.
         
         Construct a parser with the provided options.
 
         @param opt The options for the parser.
-    */
-    inline
-    basic_parser(const parse_options& opt) noexcept;
 
-    /** Destructor.
-
-        All dynamically allocated internal memory is freed.
+        @param args Optional additional arguments
+        forwarded to the handler's constructor.
     */
-    virtual
-    ~basic_parser()
+    template<class... Args>
+    basic_parser(
+        parse_options const& opt,
+        Args&&... args);
+
+    /** Return a reference to the handler.
+    */
+    Handler&
+    handler() noexcept
     {
-        // VFALCO defaulting this causes link
-        // errors on some older toolchains.
+        return h_;
+    }
+
+    /** Return a reference to the handler.
+    */
+    Handler const&
+    handler() const noexcept
+    {
+        return h_;
     }
 
     /** Return true if a complete JSON has been parsed.
@@ -219,7 +309,7 @@ public:
     std::size_t
     depth() const noexcept
     {
-        return depth_;
+        return max_depth_ - depth_;
     }
 
     /** Returns the maximum allowed depth of input JSON.
@@ -237,18 +327,23 @@ public:
         When the maximum depth is exceeded, parser
         operations will return @ref error::too_deep.
 
+        @par Preconditions
+
+        @ref write_some has not been called since
+        the last call to @ref reset.
+
         @param levels The maximum depth.
     */
     void
     max_depth(unsigned long levels) noexcept
     {
+        BOOST_ASSERT(st_.empty());
         max_depth_ = levels;
     }
 
-protected:
     /** Reset the state, to parse a new document.
     */
-    inline
+    inline//BOOST_JSON_DECL
     void
     reset() noexcept;
 
@@ -378,10 +473,8 @@ protected:
         @return The number of characters successfully
         parsed, which may be smaller than `size`.
     */
-    template<class Handler>
     std::size_t
     write_some(
-        Handler& h,
         bool more,
         char const* data,
         std::size_t size,

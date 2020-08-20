@@ -42,37 +42,6 @@
 
 namespace boost {
 namespace json {
-
-enum class basic_parser::state : char
-{
-    doc1,  doc2,  doc3,
-    com1,  com2,  com3,
-    com4,  com5,  com6, 
-    com7,  com8,  com9, 
-    com10, com11, com12,
-    nul1,  nul2,  nul3,
-    tru1,  tru2,  tru3,
-    fal1,  fal2,  fal3,  fal4,
-    str1,  str2,  str3,  str4,
-    str5,  str6,  str7,
-    sur1,  sur2,  sur3,
-    sur4,  sur5,  sur6,
-    utf1,  utf2,  utf3, 
-    utf4,  utf5,  utf6,
-    utf7,  utf8,  utf9, 
-    utf10, utf11, utf12, 
-    utf13, utf14, utf15, 
-    utf16, utf17, utf18,
-    obj1,  obj2,  obj3,  obj4,
-    obj5,  obj6,  obj7,
-    arr1,  arr2,  arr3,  arr4,
-    num1,  num2,  num3,  num4,
-    num5,  num6,  num7,  num8,
-    exp1,  exp2,  exp3
-};
-
-//----------------------------------------------------------
-
 namespace detail {
 
 inline
@@ -150,7 +119,7 @@ pow10(int exp) noexcept
 
         1e+300, 1e+301, 1e+302, 1e+303, 1e+304, 1e+305, 1e+306, 1e+307, 1e+308 };
 
-    if (exp < -308 || exp > 308)
+    if(exp < -308 || exp > 308)
     {
         return std::pow(10.0, exp);
     }
@@ -182,15 +151,17 @@ dec_to_float(
 
 //----------------------------------------------------------
 
+template<class Handler>
 bool
-basic_parser::
+basic_parser<Handler>::
 is_control(char c) noexcept
 {
     return static_cast<unsigned char>(c) < 32;
 }
 
+template<class Handler>
 char
-basic_parser::
+basic_parser<Handler>::
 hex_digit(char c) noexcept
 {
     // by Peter Dimov
@@ -202,81 +173,181 @@ hex_digit(char c) noexcept
     return -1;
 }
 
+template<class Handler>
 void
-basic_parser::
+basic_parser<Handler>::
 reserve()
 {
-    if (BOOST_JSON_LIKELY(
+    if(BOOST_JSON_LIKELY(
         ! st_.empty()))
         return;
     // Reserve the largest stack we need,
     // to avoid reallocation during suspend.
     st_.reserve(
         sizeof(state) + // document parsing state
-        (sizeof(state) * depth_) + // array and object state
+        (sizeof(state) * depth()) + // array and object state
         sizeof(state) + // value parsing state
         sizeof(state)); // comment/utf8 state
 }
 
-void
-basic_parser::
-suspend(state st)
+//----------------------------------------------------------
+//
+// The canary value is returned by parse functions
+// to indicate that the parser failed, or suspended.
+// this is used as it is distinct from all valid values
+// for data in write_some
+
+template<class Handler>
+const char*
+basic_parser<Handler>::
+canary()
 {
-    reserve();
-    st_.push_unchecked(st);
-}
-
-void
-basic_parser::
-suspend(state st, number const& num)
-{
-    reserve();
-    num_ = num;
-    st_.push_unchecked(st);
-}
-
-// return `false` if fully consumed
-bool
-basic_parser::
-skip_white(const_stream& cs)
-{
-    char const * p = cs.data();
-    std::size_t n = cs.remain();
-
-    std::size_t n2 = detail::count_whitespace( p, n );
-    cs.skip( n2 );
-
-    return n2 < n;
+    return reinterpret_cast<
+        const char*>(this);
 }
 
 template<class Handler>
-auto
-basic_parser::
-syntax_error(
-    Handler&,
-    const_stream&) ->
-        result
+bool
+basic_parser<Handler>::
+incomplete(
+    const detail::const_stream_wrapper& cs)
 {
-    ec_ = error::syntax;
-    return result::fail;
+    return cs.begin() == canary();
 }
 
+//----------------------------------------------------------
+//
+// These functions are declared with the BOOST_NOINLINE
+// attribute to avoid polluting the parsers hot-path.
+// They return the canary value to indicate suspension
+// or failure.
+
+template<class Handler>
+const char*
+basic_parser<Handler>::
+suspend_or_fail(state st)
+{
+    if(BOOST_JSON_LIKELY(
+        ! ec_ && more_))
+    {
+        // suspend
+        reserve();
+        st_.push_unchecked(st);
+    }
+    return canary();
+}
+
+template<class Handler>
+const char*
+basic_parser<Handler>::
+fail(const char* p) noexcept
+{
+    end_ = p;
+    return canary();
+}
+
+template<class Handler>
+const char*
+basic_parser<Handler>::
+fail(
+    const char* p, 
+    error ev) noexcept
+{
+    end_ = p;
+    ec_ = ev;
+    return canary();
+}
+
+template<class Handler>
+const char*
+basic_parser<Handler>::
+maybe_suspend(
+    const char* p, 
+    state st)
+{
+    end_ = p;
+    if(BOOST_JSON_LIKELY(more_))
+    {
+        // suspend
+        reserve();
+        st_.push_unchecked(st);
+    }
+    return canary();
+}
+
+template<class Handler>
+const char*
+basic_parser<Handler>::
+maybe_suspend(
+    const char* p, 
+    state st,
+    const number& num)
+{
+    end_ = p;
+    if(BOOST_JSON_LIKELY(more_))
+    {
+        // suspend
+        num_ = num;
+        reserve();
+        st_.push_unchecked(st);;
+    }
+    return canary();
+}
+
+template<class Handler>
+const char*
+basic_parser<Handler>::
+suspend(
+    const char* p, 
+    state st)
+{
+    end_ = p;
+    // suspend
+    reserve();
+    st_.push_unchecked(st);
+    return canary();
+}
+
+template<class Handler>
+const char*
+basic_parser<Handler>::
+suspend(
+    const char* p, 
+    state st,
+    const number& num)
+{
+    end_ = p;
+    // suspend
+    num_ = num;
+    reserve();
+    st_.push_unchecked(st);
+    return canary();
+}
+
+template<class Handler>
+const char*
+basic_parser<Handler>::
+syntax_error(
+    const char* p)
+{
+    end_ = p;
+    ec_ = error::syntax;
+    return canary();
+}
+
+template<class Handler>
 template<
     bool StackEmpty,
     bool ReturnValue,
     bool Terminal,
     bool AllowTrailing,
-    bool AllowBadUTF8,
-    class Handler>
-auto
-basic_parser::
-parse_comment(
-    Handler& h,
-    const_stream& cs) ->
-    result
+    bool AllowBadUTF8>
+const char*
+basic_parser<Handler>::
+parse_comment(const char* p)
 {
-    const char* start = cs.data();
-    const char* end_tok;
+    detail::const_stream_wrapper cs(p, end_);
+    const char* start = cs.begin();
     std::size_t remain;
     if(! StackEmpty && ! st_.empty())
     {
@@ -296,103 +367,92 @@ parse_comment(
     ++cs;
 do_com1:
     if(BOOST_JSON_UNLIKELY(! cs))
-    {
-        if(BOOST_JSON_LIKELY(more_))
-            suspend(state::com1);
-        return result::partial;
-    }
+        return maybe_suspend(cs.begin(), state::com1);
     switch(*cs)
     {
     case '/':
         ++cs;
 do_com2:
+        // KRYSTIAN TODO: this is a mess, we have to fix this
         remain = cs.remain();
-        end_tok = remain ? static_cast<const char*>(
-            std::memchr(cs.data(), '\n', remain)) : nullptr;
-        if(BOOST_JSON_UNLIKELY(! end_tok))
+        cs = remain ? static_cast<const char*>(
+            std::memchr(cs.begin(), '\n', remain)) : canary();
+        if(! cs.begin())
+            cs = canary();
+        if(BOOST_JSON_UNLIKELY(incomplete(cs)))
         {
-            cs.skip(remain);
             // if the doc does not terminate
             // with a newline, treat it as the
             // end of the comment
             if(Terminal && ! more_)
             {
-                if(BOOST_JSON_UNLIKELY(! h.on_comment(
-                    {start, cs.used(start)}, ec_)))
-                    return result::fail;
-                return result::ok;
+                if(BOOST_JSON_UNLIKELY(! h_.on_comment(
+                    {start, cs.remain(start)}, ec_)))
+                    return fail(cs.end());
+                return cs.end();
             }
-            if(BOOST_JSON_UNLIKELY(! h.on_comment_part(
-                {start, cs.used(start)}, ec_)))
-                return result::fail;
-            if(Terminal || more_)
-                suspend(state::com2);
-            return result::partial;
+            if(BOOST_JSON_UNLIKELY(! h_.on_comment_part(
+                {start, cs.remain(start)}, ec_)))
+                return fail(cs.end());
+            if(Terminal)
+                return suspend(cs.end(), state::com2);
+            return maybe_suspend(cs.end(), state::com2);
         }
-        cs.skip_to(end_tok);
         break;
     case '*':
         do
         {
             ++cs;
 do_com3:
+            // KRYSTIAN TODO: this is a mess, we have to fix this
             remain = cs.remain();
-            end_tok = remain ? static_cast<const char*>(
-                std::memchr(cs.data(), '*', remain)) : nullptr;
+            cs = remain ? static_cast<const char*>(
+                std::memchr(cs.begin(), '*', remain)) : canary();
+            if(! cs.begin())
+                cs = canary();
             // stopped inside a c comment
-            if(BOOST_JSON_UNLIKELY(! end_tok))
+            if(BOOST_JSON_UNLIKELY(incomplete(cs)))
             {
-                cs.skip(remain);
-                if(BOOST_JSON_UNLIKELY(! h.on_comment_part(
-                    {start, cs.used(start)}, ec_)))
-                    return result::fail;
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::com3);
-                return result::partial;
+                if(BOOST_JSON_UNLIKELY(! h_.on_comment_part(
+                    {start, cs.remain(start)}, ec_)))
+                    return fail(cs.end());
+                return maybe_suspend(cs.end(), state::com3);
             }
-            cs.skip_to(end_tok);
             // found a asterisk, check if the next char is a slash
             ++cs;
 do_com4:
             if(BOOST_JSON_UNLIKELY(! cs))
             {
-                if (BOOST_JSON_UNLIKELY(! h.on_comment_part(
+                if(BOOST_JSON_UNLIKELY(! h_.on_comment_part(
                     {start, cs.used(start)}, ec_)))
-                    return result::fail;
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::com4);
-                return result::partial;
+                    return fail(cs.begin());
+                return maybe_suspend(cs.begin(), state::com4);
             }
         }
         while(*cs != '/');
         break;
     default:
-        ec_ = error::syntax;
-        return result::fail;
+        return fail(cs.begin(), error::syntax);
     }
     ++cs;
-    if(BOOST_JSON_UNLIKELY(! h.on_comment(
+    if(BOOST_JSON_UNLIKELY(! h_.on_comment(
         {start, cs.used(start)}, ec_)))
-        return result::fail;
+        return fail(cs.begin());
     if(! ReturnValue)
-        return result::ok;
+        return cs.begin();
 do_com5:
-    if(BOOST_JSON_UNLIKELY(
-        ! skip_white(cs)))
-    {
-        if(BOOST_JSON_LIKELY(more_))
-            suspend(state::com5);
-        return result::partial;
-    }
+    cs = detail::count_whitespace(cs.begin(), cs.end());
+    if(BOOST_JSON_UNLIKELY(! cs))
+        return maybe_suspend(cs.begin(), state::com5);
     return parse_value<StackEmpty, true, 
-        AllowTrailing, AllowBadUTF8>(h, cs);
+        AllowTrailing, AllowBadUTF8>(cs.begin());
 }
 
+template<class Handler>
 template<bool StackEmpty>
-auto
-basic_parser::
-validate_utf8(const_stream& cs) ->
-    result
+const char*
+basic_parser<Handler>::
+validate_utf8(const char* p, const char* end)
 {
     // 0 = invalid
     // 1 = 2 bytes, second byte [80, BF]
@@ -413,9 +473,95 @@ validate_utf8(const_stream& cs) ->
         2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 4, 3, 3, 
         5, 6, 6, 6, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
     };
-
+    detail::const_stream_wrapper cs(p, end);
     unsigned char c;
-    if(! StackEmpty && ! st_.empty())
+    if(StackEmpty || st_.empty())
+    {
+        // fast path
+        if(BOOST_JSON_LIKELY(
+            cs.remain() >= 4))
+        {
+            BOOST_ASSERT(static_cast<
+                unsigned char>(*cs) > 0x7F);
+            uint32_t v;
+            std::memcpy(&v, cs.begin(), 4);
+#ifdef BOOST_JSON_BIG_ENDIAN
+            v = (((v & 0xFF000000) >> 24) |
+            ((v & 0x00FF0000) >> 8) |
+            ((v & 0x0000FF00) << 8) |
+            ((v & 0x000000FF) << 24));
+#endif
+            switch(first[v & 0x0000007F])
+            {
+            // 2 bytes, second byte [80, BF]
+            case 1:
+                if(BOOST_JSON_LIKELY(
+                    (v & 0x0000C000) == 0x00008000))
+                {
+                    cs += 2;
+                    return cs.begin();
+                }
+                break;
+            // 3 bytes, second byte [A0, BF]
+            case 2:
+                if(BOOST_JSON_LIKELY(
+                    (v & 0x00C0E000) == 0x0080A000))
+                {
+                    cs += 3;
+                    return cs.begin();
+                }
+                break;
+            // 3 bytes, second byte [80, BF]
+            case 3:
+                if(BOOST_JSON_LIKELY(
+                    (v & 0x00C0C000) == 0x00808000))
+                {
+                    cs += 3;
+                    return cs.begin();
+                }
+                break;
+            // 3 bytes, second byte [80, 9F]
+            case 4:
+                if(BOOST_JSON_LIKELY(
+                    (v & 0x00C0E000) == 0x00808000))
+                {
+                    cs += 3;
+                    return cs.begin();
+                }
+                break;
+            // 4 bytes, second byte [90, BF]
+            case 5:
+                if(BOOST_JSON_LIKELY(
+                    (v & 0xC0C0FF00) + 
+                    0x7F7F7000 <= 0x00002F00))
+                {
+                    cs += 4;
+                    return cs.begin();
+                }
+                break;
+            // 4 bytes, second byte [80, BF]
+            case 6:
+                if(BOOST_JSON_LIKELY(
+                    (v & 0xC0C0C000) == 0x80808000))
+                {
+                    cs += 4;
+                    return cs.begin();
+                }
+                break;
+            // 4 bytes, second byte [80, 8F]
+            case 7:
+                if(BOOST_JSON_LIKELY(
+                    (v & 0xC0C0F000) == 0x80808000))
+                {
+                    cs += 4;
+                    return cs.begin();
+                }
+                break;
+            }
+            return fail(cs.begin(), error::syntax);
+        }
+    }
+    else
     {
         state st;
         st_.pop(st);
@@ -440,314 +586,161 @@ validate_utf8(const_stream& cs) ->
         case state::utf16: goto do_utf16;
         }
     }
-    // fast path
-    if (BOOST_JSON_LIKELY(
-        cs.remain() >= 4))
+    c = static_cast<unsigned char>(*cs);
+    BOOST_ASSERT(c > 0x7F);
+    ++cs;
+    switch(first[c & 0x7F])
     {
-        BOOST_ASSERT(static_cast<
-            unsigned char>(*cs) > 0x7F);
-        uint32_t v;
-        std::memcpy(&v, cs.data(), 4);
-#ifdef BOOST_JSON_BIG_ENDIAN
-        v = (((v & 0xFF000000) >> 24) |
-        ((v & 0x00FF0000) >> 8) |
-        ((v & 0x0000FF00) << 8) |
-        ((v & 0x000000FF) << 24));
-#endif
-        switch(first[v & 0x0000007F])
-        {
-        // 2 bytes, second byte [80, BF]
-        case 1:
-            if(BOOST_JSON_LIKELY(
-                (v & 0x0000C000) == 0x00008000))
-            {
-                cs.skip(2);
-                return result::ok;
-            }
-            break;
-        // 3 bytes, second byte [A0, BF]
-        case 2:
-            if(BOOST_JSON_LIKELY(
-                (v & 0x00C0E000) == 0x0080A000))
-            {
-                cs.skip(3);
-                return result::ok;
-            }
-            break;
-        // 3 bytes, second byte [80, BF]
-        case 3:
-            if(BOOST_JSON_LIKELY(
-                (v & 0x00C0C000) == 0x00808000))
-            {
-                cs.skip(3);
-                return result::ok;
-            }
-            break;
-        // 3 bytes, second byte [80, 9F]
-        case 4:
-            if(BOOST_JSON_LIKELY(
-                (v & 0x00C0E000) == 0x00808000))
-            {
-                cs.skip(3);
-                return result::ok;
-            }
-            break;
-        // 4 bytes, second byte [90, BF]
-        case 5:
-            if(BOOST_JSON_LIKELY(
-                (v & 0xC0C0FF00) + 
-                0x7F7F7000 <= 0x00002F00))
-            {
-                cs.skip(4);
-                return result::ok;
-            }
-            break;
-        // 4 bytes, second byte [80, BF]
-        case 6:
-            if(BOOST_JSON_LIKELY(
-                (v & 0xC0C0C000) == 0x80808000))
-            {
-                 cs.skip(4);
-                 return result::ok;
-            }
-            break;
-        // 4 bytes, second byte [80, 8F]
-        case 7:
-            if(BOOST_JSON_LIKELY(
-                (v & 0xC0C0F000) == 0x80808000))
-            {
-                cs.skip(4);
-                return result::ok;
-            }
-            break;
-        }
-        ec_ = error::syntax;
-        return result::fail;
-    }
-    else
-    {
-        c = static_cast<unsigned char>(*cs);
-        BOOST_ASSERT(c > 0x7F);
-        ++cs;
-        switch(first[c & 0x7F])
-        {
-        // 2 bytes
-        case 1:
+    // 2 bytes
+    case 1:
 do_utf1:
-            if(BOOST_JSON_UNLIKELY(! cs))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::utf1);
-                return result::partial;
-            }
-            if(BOOST_JSON_UNLIKELY(
-                (*cs & 0xC0) != 0x80))
-                break;
-            ++cs;
-            return result::ok;
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::utf1);
+        if(BOOST_JSON_UNLIKELY(
+            (*cs & 0xC0) != 0x80))
+            break;
+        ++cs;
+        return cs.begin();
                 
-        // 3 bytes, second byte [A0, BF]
-        case 2:
+    // 3 bytes, second byte [A0, BF]
+    case 2:
 do_utf2:
-            if(BOOST_JSON_UNLIKELY(! cs))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::utf2);
-                return result::partial;
-            }
-            if(BOOST_JSON_UNLIKELY(
-                (*cs & 0xE0) != 0xA0))
-                break;
-            ++cs;
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::utf2);
+        if(BOOST_JSON_UNLIKELY(
+            (*cs & 0xE0) != 0xA0))
+            break;
+        ++cs;
 do_utf3:
-            if(BOOST_JSON_UNLIKELY(! cs))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::utf3);
-                return result::partial;
-            }
-            if(BOOST_JSON_UNLIKELY(
-                (*cs & 0xC0) != 0x80))
-                break;
-            ++cs;
-            return result::ok;
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::utf3);
+        if(BOOST_JSON_UNLIKELY(
+            (*cs & 0xC0) != 0x80))
+            break;
+        ++cs;
+        return cs.begin();
                 
-        // 3 bytes, second byte [80, BF]
-        case 3:
+    // 3 bytes, second byte [80, BF]
+    case 3:
 do_utf4:
-            if(BOOST_JSON_UNLIKELY(! cs))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::utf4);
-                return result::partial;
-            }
-            if(BOOST_JSON_UNLIKELY(
-                (*cs & 0xC0) != 0x80))
-                break;
-            ++cs;
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::utf4);
+        if(BOOST_JSON_UNLIKELY(
+            (*cs & 0xC0) != 0x80))
+            break;
+        ++cs;
 do_utf5:
-            if(BOOST_JSON_UNLIKELY(! cs))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::utf5);
-                return result::partial;
-            }
-            if(BOOST_JSON_UNLIKELY(
-                (*cs & 0xC0) != 0x80))
-                break;
-            ++cs;
-            return result::ok;
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::utf5);
+        if(BOOST_JSON_UNLIKELY(
+            (*cs & 0xC0) != 0x80))
+            break;
+        ++cs;
+        return cs.begin();
                 
-        // 3 bytes, second byte [80, 9F]
-        case 4:
+    // 3 bytes, second byte [80, 9F]
+    case 4:
 do_utf6:
-            if(BOOST_JSON_UNLIKELY(! cs))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::utf6);
-                return result::partial;
-            }
-            if(BOOST_JSON_UNLIKELY(
-                (*cs & 0xE0) != 0x80))
-                break;
-            ++cs;
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::utf6);
+        if(BOOST_JSON_UNLIKELY(
+            (*cs & 0xE0) != 0x80))
+            break;
+        ++cs;
 do_utf7:
-            if(BOOST_JSON_UNLIKELY(! cs))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::utf7);
-                return result::partial;
-            }
-            if(BOOST_JSON_UNLIKELY(
-                (*cs & 0xC0) != 0x80))
-                break;
-            ++cs;
-            return result::ok;
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::utf7);
+        if(BOOST_JSON_UNLIKELY(
+            (*cs & 0xC0) != 0x80))
+            break;
+        ++cs;
+        return cs.begin();
 
-        // 4 bytes, second byte [90, BF]
-        case 5:
+    // 4 bytes, second byte [90, BF]
+    case 5:
 do_utf8:
-            if(BOOST_JSON_UNLIKELY(! cs))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::utf8);
-                return result::partial;
-            }
-            if(BOOST_JSON_UNLIKELY(
-                (*cs + 0x70) > 0x2F))
-                break;
-            ++cs;
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::utf8);
+        if(BOOST_JSON_UNLIKELY(
+            (*cs + 0x70) > 0x2F))
+            break;
+        ++cs;
 do_utf9:
-            if(BOOST_JSON_UNLIKELY(! cs))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::utf9);
-                return result::partial;
-            }
-            if(BOOST_JSON_UNLIKELY(
-                (*cs & 0xC0) != 0x80))
-                break;
-            ++cs;
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::utf9);
+        if(BOOST_JSON_UNLIKELY(
+            (*cs & 0xC0) != 0x80))
+            break;
+        ++cs;
 do_utf10:
-            if(BOOST_JSON_UNLIKELY(! cs))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::utf10);
-                return result::partial;
-            }
-            if(BOOST_JSON_UNLIKELY(
-                (*cs & 0xC0) != 0x80))
-                break;
-            ++cs;
-            return result::ok;
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::utf10);
+        if(BOOST_JSON_UNLIKELY(
+            (*cs & 0xC0) != 0x80))
+            break;
+        ++cs;
+        return cs.begin();
                 
-        // 4 bytes, second byte [80, BF]
-        case 6:
+    // 4 bytes, second byte [80, BF]
+    case 6:
 do_utf11:
-            if(BOOST_JSON_UNLIKELY(! cs))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::utf11);
-                return result::partial;
-            }
-            if(BOOST_JSON_UNLIKELY(
-                (*cs & 0xC0) != 0x80))
-                break;
-            ++cs;
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::utf11);
+        if(BOOST_JSON_UNLIKELY(
+            (*cs & 0xC0) != 0x80))
+            break;
+        ++cs;
 do_utf12:
-            if(BOOST_JSON_UNLIKELY(! cs))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::utf12);
-                return result::partial;
-            }
-            if(BOOST_JSON_UNLIKELY(
-                (*cs & 0xC0) != 0x80))
-                break;
-            ++cs;
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::utf12);
+        if(BOOST_JSON_UNLIKELY(
+            (*cs & 0xC0) != 0x80))
+            break;
+        ++cs;
 do_utf13:
-            if(BOOST_JSON_UNLIKELY(! cs))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::utf13);
-                return result::partial;
-            }
-            if(BOOST_JSON_UNLIKELY(
-                (*cs & 0xC0) != 0x80))
-                break;
-            ++cs;
-            return result::ok;
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::utf13);
+        if(BOOST_JSON_UNLIKELY(
+            (*cs & 0xC0) != 0x80))
+            break;
+        ++cs;
+        return cs.begin();
                 
-        // 4 bytes, second byte [80, 8F]
-        case 7:
+    // 4 bytes, second byte [80, 8F]
+    case 7:
 do_utf14:
-            if(BOOST_JSON_UNLIKELY(! cs))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::utf14);
-                return result::partial;
-            }
-            if(BOOST_JSON_UNLIKELY(
-                (*cs & 0xF0) != 0x80))
-                break;
-            ++cs;
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::utf14);
+        if(BOOST_JSON_UNLIKELY(
+            (*cs & 0xF0) != 0x80))
+            break;
+        ++cs;
 do_utf15:
-            if(BOOST_JSON_UNLIKELY(! cs))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::utf15);
-                return result::partial;
-            }
-            if(BOOST_JSON_UNLIKELY(
-                (*cs & 0xC0) != 0x80))
-                break;
-            ++cs;
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::utf15);
+        if(BOOST_JSON_UNLIKELY(
+            (*cs & 0xC0) != 0x80))
+            break;
+        ++cs;
 do_utf16:
-            if(BOOST_JSON_UNLIKELY(! cs))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::utf16);
-                return result::partial;
-            }
-            if(BOOST_JSON_UNLIKELY(
-                (*cs & 0xC0) != 0x80))
-                break;
-            ++cs;
-            return result::ok;
-        }
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::utf16);
+        if(BOOST_JSON_UNLIKELY(
+            (*cs & 0xC0) != 0x80))
+            break;
+        ++cs;
+        return cs.begin();
     }
-    ec_ = error::syntax;
-    return result::fail;
+    return fail(cs.begin(), error::syntax);
 }
 
-template<bool StackEmpty, class Handler>
-auto
-basic_parser::
-parse_document(
-    Handler& h,
-    const_stream& cs) ->
-        result
+template<class Handler>
+template<bool StackEmpty>
+const char*
+basic_parser<Handler>::
+parse_document(const char* p)
 {
+    detail::const_stream_wrapper cs(p, end_);
     if(! StackEmpty && ! st_.empty())
     {
         state st;
@@ -758,149 +751,129 @@ parse_document(
         case state::doc1: goto do_doc1;
         case state::doc2: goto do_doc2;
         case state::doc3: goto do_doc3;
-        case state::com12: goto do_com12;
+        case state::doc4: goto do_doc4;
         }
     }
 do_doc1:
-    if(BOOST_JSON_UNLIKELY(
-        ! skip_white(cs)))
-    {
-        if(more_)
-            suspend(state::doc1);
-        return result::partial;
-    }
+    cs = detail::count_whitespace(cs.begin(), cs.end());
+    if(BOOST_JSON_UNLIKELY(! cs))
+        return maybe_suspend(cs.begin(), state::doc1);
 do_doc2:
+    switch(+opt_.allow_comments |
+        (opt_.allow_trailing_commas << 1) |
+        (opt_.allow_invalid_utf8 << 2))
     {
-        result r;
-        switch (+opt_.allow_comments |
-            (opt_.allow_trailing_commas << 1) |
-            (opt_.allow_invalid_utf8 << 2))
-        {
-        // no extensions
-        default:
-            r = parse_value<StackEmpty, false, false, false>(h, cs);
-            break;
-        // comments
-        case 1:
-            r = parse_value<StackEmpty, true, false, false>(h, cs);
-            break;
-        // trailing
-        case 2:
-            r = parse_value<StackEmpty, false, true, false>(h, cs);
-            break;
-        // comments & trailing
-        case 3:
-            r = parse_value<StackEmpty, true, true, false>(h, cs);
-            break;
-        // skip validation
-        case 4:
-            r = parse_value<StackEmpty, false, false, true>(h, cs);
-            break;
-        // comments & skip validation
-        case 5:
-            r = parse_value<StackEmpty, true, false, true>(h, cs);
-            break;
-        // trailing & skip validation
-        case 6:
-            r = parse_value<StackEmpty, false, true, true>(h, cs);
-            break;
-        // comments & trailing & skip validation
-        case 7:
-            r = parse_value<StackEmpty, true, true, true>(h, cs);
-            break;
-        }
-        if(BOOST_JSON_UNLIKELY(r))
-        {
-            if(more_ && r == result::partial)
-                suspend(state::doc2);
-            return r;
-        }
+    // no extensions
+    default:
+        cs = parse_value<StackEmpty, false, false, false>(cs.begin());
+        break;
+    // comments
+    case 1:
+        cs = parse_value<StackEmpty, true, false, false>(cs.begin());
+        break;
+    // trailing
+    case 2:
+        cs = parse_value<StackEmpty, false, true, false>(cs.begin());
+        break;
+    // comments & trailing
+    case 3:
+        cs = parse_value<StackEmpty, true, true, false>(cs.begin());
+        break;
+    // skip validation
+    case 4:
+        cs = parse_value<StackEmpty, false, false, true>(cs.begin());
+        break;
+    // comments & skip validation
+    case 5:
+        cs = parse_value<StackEmpty, true, false, true>(cs.begin());
+        break;
+    // trailing & skip validation
+    case 6:
+        cs = parse_value<StackEmpty, false, true, true>(cs.begin());
+        break;
+    // comments & trailing & skip validation
+    case 7:
+        cs = parse_value<StackEmpty, true, true, true>(cs.begin());
+        break;
     }
+    if(BOOST_JSON_UNLIKELY(incomplete(cs)))
+        return suspend_or_fail(state::doc2);
 do_doc3:
-    if(BOOST_JSON_UNLIKELY(
-        ! skip_white(cs)))
+    cs = detail::count_whitespace(cs.begin(), cs.end());
+    if(BOOST_JSON_UNLIKELY(! cs))
     {
         if(more_)
-        {
-            suspend(state::doc3);
-            return result::partial;
-        }
+            return suspend(cs.begin(), state::doc3);
     }
-    else if (opt_.allow_comments && *cs == '/')
+    else if(opt_.allow_comments && *cs == '/')
     {
-do_com12:
-        result r;
-        switch (+opt_.allow_trailing_commas |
+do_doc4:
+        switch(+opt_.allow_trailing_commas |
             (opt_.allow_invalid_utf8 << 1))
         {
         // only comments
         default:
-            r = parse_comment<StackEmpty, false, true, false, false>(h, cs);
+            cs = parse_comment<StackEmpty, false, true, false, false>(cs.begin());
             break;
         // trailing
         case 1:
-            r = parse_comment<StackEmpty, false, true, true, false>(h, cs);
+            cs = parse_comment<StackEmpty, false, true, true, false>(cs.begin());
             break;
         // skip validation
         case 2:
-            r = parse_comment<StackEmpty, false, true, false, true>(h, cs);
+            cs = parse_comment<StackEmpty, false, true, false, true>(cs.begin());
             break;
         // trailing & skip validation
         case 3:
-            r = parse_comment<StackEmpty, false, true, true, true>(h, cs);
+            cs = parse_comment<StackEmpty, false, true, true, true>(cs.begin());
             break;
         }
-        if(BOOST_JSON_LIKELY(!r))
-            goto do_doc3;
-        else if(more_ && r == result::partial)
-            suspend(state::com12);
-        return r;
+        if(BOOST_JSON_UNLIKELY(incomplete(cs)))
+            return suspend_or_fail(state::doc4);
+        goto do_doc3;
     }
-    return result::ok;
+    return cs.begin();
 }
 
+template<class Handler>
 template<
     bool StackEmpty, 
     bool AllowComments, 
     bool AllowTrailing, 
-    bool AllowBadUTF8,
-    class Handler>
-auto
-basic_parser::
-parse_value(
-    Handler& h,
-    const_stream& cs) ->
-        result
+    bool AllowBadUTF8>
+const char*
+basic_parser<Handler>::
+parse_value(const char* p)
 {
     if(StackEmpty || st_.empty())
     {
-        static constexpr auto num = &basic_parser::parse_number<true, '+', Handler>;
-        static constexpr auto err = &basic_parser::syntax_error<Handler>;
+        static constexpr auto num = &basic_parser::parse_number<true, '+'>;
+        static constexpr auto err = &basic_parser::syntax_error;
 
-        static constexpr result(basic_parser::* jump_table[256])(Handler&, const_stream&) = {
+        static constexpr const char* (basic_parser::* jump_table[256])(const char*) = {
             err, err, err, err, err, err, err, err, err, err, err, err, err, err, err, err,
             err, err, err, err, err, err, err, err, err, err, err, err, err, err, err, err,
             err, err,
-                &basic_parser::parse_string<true, AllowBadUTF8, Handler>,
+                &basic_parser::parse_string<true, AllowBadUTF8>,
                 err, err, err, err, err, err, err, err, err, err,
-                &basic_parser::parse_number<true, '-', Handler>,
+                &basic_parser::parse_number<true, '-'>,
                 err,
-                AllowComments ? &basic_parser::parse_comment<true, true, false, AllowTrailing, AllowBadUTF8, Handler> : err,
-            &basic_parser::parse_number<true, '0', Handler>,
+                AllowComments ? &basic_parser::parse_comment<true, true, false, AllowTrailing, AllowBadUTF8> : err,
+            &basic_parser::parse_number<true, '0'>,
                 num, num, num, num, num, num, num, num, num, err, err, err, err, err, err,
             err, err, err, err, err, err, err, err, err, err, err, err, err, err, err, err,
             err, err, err, err, err, err, err, err, err, err, err,
-                &basic_parser::parse_array<true, AllowComments, AllowTrailing, AllowBadUTF8, Handler>,
+                &basic_parser::parse_array<true, AllowComments, AllowTrailing, AllowBadUTF8>,
                 err, err, err, err,
             err, err, err, err, err, err,
-                &basic_parser::parse_false<true, Handler>,
+                &basic_parser::parse_false<true>,
                 err, err, err, err, err, err, err,
-                &basic_parser::parse_null<true, Handler>,
+                &basic_parser::parse_null<true>,
                 err,
             err, err, err, err,
-                &basic_parser::parse_true<true, Handler>,
+                &basic_parser::parse_true<true>,
                 err, err, err, err, err, err,
-                &basic_parser::parse_object<true, AllowComments, AllowTrailing, AllowBadUTF8, Handler>,
+                &basic_parser::parse_object<true, AllowComments, AllowTrailing, AllowBadUTF8>,
                 err, err, err, err,
 
             // negative values are converted to unsigned char, they are handled here
@@ -914,24 +887,21 @@ parse_value(
             err, err, err, err, err, err, err, err, err, err, err, err, err, err, err, err
         };
         return (this->*jump_table
-            [static_cast<unsigned char>(*cs)])(h, cs);
+            [static_cast<unsigned char>(*p)])(p);
     }
     return resume_value<StackEmpty, AllowComments, 
-        AllowTrailing, AllowBadUTF8>(h, cs);
+        AllowTrailing, AllowBadUTF8>(p);
 }
 
+template<class Handler>
 template<
     bool StackEmpty,
     bool AllowComments,
     bool AllowTrailing,
-    bool AllowBadUTF8,
-    class Handler>
-auto
-basic_parser::
-resume_value(
-    Handler& h,
-    const_stream& cs0) ->
-        result
+    bool AllowBadUTF8>
+const char*
+basic_parser<Handler>::
+resume_value(const char* p)
 {
     state st;
     st_.peek(st);
@@ -940,15 +910,15 @@ resume_value(
     default:
     case state::nul1: case state::nul2:
     case state::nul3:
-        return parse_null<StackEmpty>(h, cs0);
+        return parse_null<StackEmpty>(p);
 
     case state::tru1: case state::tru2:
     case state::tru3:
-        return parse_true<StackEmpty>(h, cs0);
+        return parse_true<StackEmpty>(p);
 
     case state::fal1: case state::fal2:
     case state::fal3: case state::fal4:
-        return parse_false<StackEmpty>(h, cs0);
+        return parse_false<StackEmpty>(p);
 
     case state::str1: case state::str2:
     case state::str3: case state::str4:
@@ -959,22 +929,22 @@ resume_value(
     case state::sur5: case state::sur6:
     case state::utf17: case state::utf18:
         return parse_string<
-            StackEmpty, AllowBadUTF8>(h, cs0);
+            StackEmpty, AllowBadUTF8>(p);
 
     case state::arr1: case state::arr2:
     case state::arr3: case state::arr4:
-    case state::com10: case state::com11:
+    case state::arr5: case state::arr6:
         return parse_array<StackEmpty, AllowComments, 
-            AllowTrailing, AllowBadUTF8>(h, cs0);
+            AllowTrailing, AllowBadUTF8>(p);
         
     case state::obj1: case state::obj2:
     case state::obj3: case state::obj4:
     case state::obj5: case state::obj6:
-    case state::obj7:
-    case state::com6: case state::com7:
-    case state::com8: case state::com9:
+    case state::obj7: case state::obj8: 
+    case state::obj9: case state::obj10: 
+    case state::obj11:
         return parse_object<StackEmpty, AllowComments, 
-            AllowTrailing, AllowBadUTF8>(h, cs0);
+            AllowTrailing, AllowBadUTF8>(p);
         
     case state::num1: case state::num2:
     case state::num3: case state::num4:
@@ -982,25 +952,38 @@ resume_value(
     case state::num7: case state::num8:
     case state::exp1: case state::exp2:
     case state::exp3:
-        return parse_number<StackEmpty, 0>(h, cs0);
+        return parse_number<StackEmpty, 0>(p);
 
     case state::com1: case state::com2:
     case state::com3: case state::com4:
     case state::com5:
         return parse_comment<StackEmpty, true, false,
-            AllowTrailing, AllowBadUTF8>(h, cs0);
+            AllowTrailing, AllowBadUTF8>(p);
     }
 }
 
-template<bool StackEmpty, class Handler>
-auto
-basic_parser::
-parse_null(
-    Handler& h,
-    const_stream& cs) ->
-        result
+template<class Handler>
+template<bool StackEmpty>
+const char*
+basic_parser<Handler>::
+parse_null(const char* p)
 {
-    if(! StackEmpty && ! st_.empty())
+    detail::const_stream_wrapper cs(p, end_);
+    if(StackEmpty || st_.empty())
+    {
+        if(BOOST_JSON_LIKELY(cs.remain() >= 4))
+        {
+            if(BOOST_JSON_UNLIKELY(
+                std::memcmp(cs.begin(), "null", 4) != 0))
+                return fail(cs.begin(), error::syntax);
+            if(BOOST_JSON_UNLIKELY(
+                ! h_.on_null(ec_)))
+                return fail(cs.begin());
+            cs += 4;
+            return cs.begin();
+        }
+    }
+    else
     {
         state st;
         st_.pop(st);
@@ -1012,87 +995,53 @@ parse_null(
         case state::nul3: goto do_nul3;
         }
     }
-    if(BOOST_JSON_LIKELY(cs.remain() >= 4))
-    {
-        if(BOOST_JSON_LIKELY(std::memcmp(
-            cs.data(), "null", 4) == 0))
-        {
-            if(BOOST_JSON_UNLIKELY(
-                ! h.on_null(ec_)))
-                return result::fail;
-            cs.skip(4);
-            return result::ok;
-        }
-        ec_ = error::syntax;
-        return result::fail;
-    }
     ++cs;
 do_nul1:
-    if(BOOST_JSON_LIKELY(cs))
-    {
-        if(BOOST_JSON_UNLIKELY(
-            *cs != 'u'))
-        {
-            ec_ = error::syntax;
-            return result::fail;
-        }
-        ++cs;
-    }
-    else
-    {
-        if(BOOST_JSON_LIKELY(more_))
-            suspend(state::nul1);
-        return result::partial;
-    }
+    if(BOOST_JSON_UNLIKELY(! cs))
+        return maybe_suspend(cs.begin(), state::nul1);
+    if(BOOST_JSON_UNLIKELY(*cs != 'u'))
+        return fail(cs.begin(), error::syntax);
+    ++cs;
 do_nul2:
-    if(BOOST_JSON_LIKELY(cs))
-    {
-        if(BOOST_JSON_UNLIKELY(
-            *cs != 'l'))
-        {
-            ec_ = error::syntax;
-            return result::fail;
-        }
-        ++cs;
-    }
-    else
-    {
-        if(BOOST_JSON_LIKELY(more_))
-            suspend(state::nul2);
-        return result::partial;
-    }
+    if(BOOST_JSON_UNLIKELY(! cs))
+        return maybe_suspend(cs.begin(), state::nul2);
+    if(BOOST_JSON_UNLIKELY(*cs != 'l'))
+        return fail(cs.begin(), error::syntax);
+    ++cs;
 do_nul3:
-    if(BOOST_JSON_LIKELY(cs))
-    {
-        if(BOOST_JSON_UNLIKELY(
-            *cs != 'l'))
-        {
-            ec_ = error::syntax;
-            return result::fail;
-        }
-        ++cs;
-    }
-    else
-    {
-        if(BOOST_JSON_LIKELY(more_))
-            suspend(state::nul3);
-        return result::partial;
-    }
+    if(BOOST_JSON_UNLIKELY(! cs))
+        return maybe_suspend(cs.begin(), state::nul3);
+    if(BOOST_JSON_UNLIKELY(*cs != 'l'))
+        return fail(cs.begin(), error::syntax);
     if(BOOST_JSON_UNLIKELY(
-        ! h.on_null(ec_)))
-        return result::fail;
-    return result::ok;
+        ! h_.on_null(ec_)))
+        return fail(cs.begin());
+    ++cs;
+    return cs.begin();
 }
 
-template<bool StackEmpty, class Handler>
-auto
-basic_parser::
-parse_true(
-    Handler& h,
-    const_stream& cs) ->
-        result
+template<class Handler>
+template<bool StackEmpty>
+const char*
+basic_parser<Handler>::
+parse_true(const char* p)
 {
-    if(! StackEmpty && ! st_.empty())
+    detail::const_stream_wrapper cs(p, end_);
+    if(StackEmpty || st_.empty())
+    {
+        if(BOOST_JSON_LIKELY(cs.remain() >= 4))
+        {
+            if(BOOST_JSON_UNLIKELY(
+                std::memcmp(cs.begin(), "true", 4) != 0))
+                return fail(cs.begin(), error::syntax);
+            if(BOOST_JSON_UNLIKELY(
+                ! h_.on_bool(true, ec_)))
+                return fail(cs.begin());
+            cs += 4;
+            return cs.begin();
+        }
+    }
+    else
     {
         state st;
         st_.pop(st);
@@ -1104,87 +1053,53 @@ parse_true(
         case state::tru3: goto do_tru3;
         }
     }
-    if(BOOST_JSON_LIKELY(cs.remain() >= 4))
-    {
-        if(BOOST_JSON_LIKELY(std::memcmp(
-            cs.data(), "true", 4) == 0))
-        {
-            if(BOOST_JSON_UNLIKELY(
-                ! h.on_bool(true, ec_)))
-                return result::fail;
-            cs.skip(4);
-            return result::ok;
-        }
-        ec_ = error::syntax;
-        return result::fail;
-    }
     ++cs;
 do_tru1:
-    if(BOOST_JSON_LIKELY(cs))
-    {
-        if(BOOST_JSON_UNLIKELY(
-            *cs != 'r'))
-        {
-            ec_ = error::syntax;
-            return result::fail;
-        }
-        ++cs;
-    }
-    else
-    {
-        if(BOOST_JSON_LIKELY(more_))
-            suspend(state::tru1);
-        return result::partial;
-    }
+    if(BOOST_JSON_UNLIKELY(! cs))
+        return maybe_suspend(cs.begin(), state::tru1);
+    if(BOOST_JSON_UNLIKELY(*cs != 'r'))
+        return fail(cs.begin(), error::syntax);
+    ++cs;
 do_tru2:
-    if(BOOST_JSON_LIKELY(cs))
-    {
-        if(BOOST_JSON_UNLIKELY(
-            *cs != 'u'))
-        {
-            ec_ = error::syntax;
-            return result::fail;
-        }
-        ++cs;
-    }
-    else
-    {
-        if(BOOST_JSON_LIKELY(more_))
-            suspend(state::tru2);
-        return result::partial;
-    }
+    if(BOOST_JSON_UNLIKELY(! cs))
+        return maybe_suspend(cs.begin(), state::tru2);
+    if(BOOST_JSON_UNLIKELY(*cs != 'u'))
+        return fail(cs.begin(), error::syntax);
+    ++cs;
 do_tru3:
-    if(BOOST_JSON_LIKELY(cs))
-    {
-        if(BOOST_JSON_UNLIKELY(
-            *cs != 'e'))
-        {
-            ec_ = error::syntax;
-            return result::fail;
-        }
-        ++cs;
-    }
-    else
-    {
-        if(BOOST_JSON_LIKELY(more_))
-            suspend(state::tru3);
-        return result::partial;
-    }
+    if(BOOST_JSON_UNLIKELY(! cs))
+        return maybe_suspend(cs.begin(), state::tru3);
+    if(BOOST_JSON_UNLIKELY(*cs != 'e'))
+        return fail(cs.begin(), error::syntax);
     if(BOOST_JSON_UNLIKELY(
-        ! h.on_bool(true, ec_)))
-        return result::fail;
-    return result::ok;
+        ! h_.on_bool(true, ec_)))
+        return fail(cs.begin());
+    ++cs;
+    return cs.begin();
 }
 
-template<bool StackEmpty, class Handler>
-auto
-basic_parser::
-parse_false(
-    Handler& h,
-    const_stream& cs) ->
-        result
+template<class Handler>
+template<bool StackEmpty>
+const char*
+basic_parser<Handler>::
+parse_false(const char* p)
 {
-    if(! StackEmpty && ! st_.empty())
+    detail::const_stream_wrapper cs(p, end_);
+    if(StackEmpty || st_.empty())
+    {
+        if(BOOST_JSON_LIKELY(cs.remain() >= 5))
+        {
+            if(BOOST_JSON_UNLIKELY(
+                std::memcmp(cs.begin() + 1, "alse", 4) != 0))
+                return fail(cs.begin(), error::expected_false);
+            if(BOOST_JSON_UNLIKELY(
+                ! h_.on_bool(false, ec_)))
+                return fail(cs.begin());
+            cs += 5;
+            return cs.begin();
+        }
+    }
+    else
     {
         state st;
         st_.pop(st);
@@ -1197,109 +1112,48 @@ parse_false(
         case state::fal4: goto do_fal4;
         }
     }
-    if(BOOST_JSON_LIKELY(cs.remain() >= 5))
-    {
-        if(BOOST_JSON_LIKELY(std::memcmp(
-            cs.data() + 1, "alse", 4) == 0))
-        {
-            if(BOOST_JSON_UNLIKELY(
-                ! h.on_bool(false, ec_)))
-                return result::fail;
-            cs.skip(5);
-            return result::ok;
-        }
-        ec_ = error::expected_false;
-        return result::fail;
-    }
     ++cs;
 do_fal1:
-    if(BOOST_JSON_LIKELY(cs))
-    {
-        if(BOOST_JSON_UNLIKELY(
-            *cs != 'a'))
-        {
-            ec_ = error::syntax;
-            return result::fail;
-        }
-        ++cs;
-    }
-    else
-    {
-        if(BOOST_JSON_LIKELY(more_))
-            suspend(state::fal1);
-        return result::partial;
-    }
+    if(BOOST_JSON_UNLIKELY(! cs))
+        return maybe_suspend(cs.begin(), state::fal1);
+    if(BOOST_JSON_UNLIKELY(*cs != 'a'))
+        return fail(cs.begin(), error::syntax);
+    ++cs;
 do_fal2:
-    if(BOOST_JSON_LIKELY(cs))
-    {
-        if(BOOST_JSON_UNLIKELY(
-            *cs != 'l'))
-        {
-            ec_ = error::syntax;
-            return result::fail;
-        }
-        ++cs;
-    }
-    else
-    {
-        if(BOOST_JSON_LIKELY(more_))
-            suspend(state::fal2);
-        return result::partial;
-    }
+    if(BOOST_JSON_UNLIKELY(! cs))
+        return maybe_suspend(cs.begin(), state::fal2);
+    if(BOOST_JSON_UNLIKELY(*cs != 'l'))
+        return fail(cs.begin(), error::syntax);
+    ++cs;
 do_fal3:
-    if(BOOST_JSON_LIKELY(cs))
-    {
-        if(BOOST_JSON_UNLIKELY(
-            *cs != 's'))
-        {
-            ec_ = error::syntax;
-            return result::fail;
-        }
-        ++cs;
-    }
-    else
-    {
-        if(BOOST_JSON_LIKELY(more_))
-            suspend(state::fal3);
-        return result::partial;
-    }
+    if(BOOST_JSON_UNLIKELY(! cs))
+        return maybe_suspend(cs.begin(), state::fal3);
+    if(BOOST_JSON_UNLIKELY(*cs != 's'))
+        return fail(cs.begin(), error::syntax);
+    ++cs;
 do_fal4:
-    if(BOOST_JSON_LIKELY(cs))
-    {
-        if(BOOST_JSON_UNLIKELY(
-            *cs != 'e'))
-        {
-            ec_ = error::syntax;
-            return result::fail;
-        }
-        ++cs;
-    }
-    else
-    {
-        if(BOOST_JSON_LIKELY(more_))
-            suspend(state::fal4);
-        return result::partial;
-    }
+    if(BOOST_JSON_UNLIKELY(! cs))
+        return maybe_suspend(cs.begin(), state::fal4);
+    if(BOOST_JSON_UNLIKELY(*cs != 'e'))
+        return fail(cs.begin(), error::syntax);
     if(BOOST_JSON_UNLIKELY(
-        ! h.on_bool(false, ec_)))
-        return result::fail;
-    return result::ok;
+        ! h_.on_bool(false, ec_)))
+        return fail(cs.begin());
+    ++cs;
+    return cs.begin();
 }
 
 //----------------------------------------------------------
 
+template<class Handler>
 template<
     bool StackEmpty, 
-    bool AllowBadUTF8,
-    class Handler>
-auto
-basic_parser::
-parse_string(
-    Handler& h,
-    const_stream& cs0) ->
-        result
+    bool AllowBadUTF8>
+const char*
+basic_parser<Handler>::
+parse_string(const char* p)
 {
-    detail::local_const_stream cs(cs0);
+    detail::clipped_const_stream cs(p, end_);
     detail::buffer<BOOST_JSON_PARSER_BUFFER_SIZE> temp;
     char const* start;
     char c;
@@ -1307,14 +1161,14 @@ parse_string(
     {
         BOOST_ASSERT(*cs == '\x22'); // '"'
         ++cs;
-        start = cs.data();
+        start = cs.begin();
     }
     else
     {
-        start = cs.data();
+        start = cs.begin();
         state st;
         st_.pop(st);
-        if (st != state::str1)
+        if(st != state::str1)
         {
             cs.clip(temp.max_size());
             switch(st)
@@ -1342,12 +1196,12 @@ parse_string(
     //
     // zero-copy unescaped runs
     //
-    if (AllowBadUTF8)
-        cs.skip(detail::count_unescaped(
-            cs.data(), cs.remain()));
+    if(AllowBadUTF8)
+        cs += detail::count_unescaped(
+            cs.begin(), cs.remain());
     else
-        cs.skip(detail::count_valid_unescaped(
-            cs.data(), cs.remain()));
+        cs += detail::count_valid_unescaped(
+            cs.begin(), cs.remain());
     for(;;)
     {
         if(BOOST_JSON_LIKELY(cs))
@@ -1359,33 +1213,28 @@ parse_string(
                 if(is_key_)
                 {
                     if(BOOST_JSON_UNLIKELY(
-                        ! h.on_key({ start,
+                        ! h_.on_key({ start,
                         cs.used(start)}, ec_)))
-                        return result::fail;
+                        return fail(cs.begin());
                     is_key_ = false;
                 }
                 else
                 {
                     if(BOOST_JSON_UNLIKELY(
-                        ! h.on_string({ start,
+                        ! h_.on_string({ start,
                         cs.used(start)}, ec_)))
-                        return result::fail;
+                        return fail(cs.begin());
                 }
                 ++cs;
-                return result::ok;
+                return cs.begin();
             }
             else if(! AllowBadUTF8 && 
                 (c & 0x80))
             {
 do_utf17:
-                const result r = 
-                    validate_utf8<StackEmpty>(cs);
-                if(BOOST_JSON_UNLIKELY(r))
-                {
-                    if(more_ && r == result::partial)
-                        suspend(state::utf17);
-                    return r;
-                }
+                cs = validate_utf8<StackEmpty>(cs.begin(), cs.end());
+                if(BOOST_JSON_UNLIKELY(incomplete(cs)))
+                    return suspend_or_fail(state::utf17);
                 continue;
             }
             else if(BOOST_JSON_LIKELY(
@@ -1393,21 +1242,21 @@ do_utf17:
             {
                 // flush unescaped run from input
                 if(BOOST_JSON_LIKELY(
-                    cs.data() > start))
+                    cs.begin() > start))
                 {
                     if(is_key_)
                     {
                         if(BOOST_JSON_UNLIKELY(
-                            ! h.on_key_part({start,
+                            ! h_.on_key_part({start,
                                 cs.used(start)}, ec_)))
-                            return result::fail;
+                            return fail(cs.begin());
                     }
                     else
                     {
                         if(BOOST_JSON_UNLIKELY(
-                            ! h.on_string_part({start,
+                            ! h_.on_string_part({start,
                                 cs.used(start)}, ec_)))
-                            return result::fail;
+                            return fail(cs.begin());
                     }
                 }
                 // Unescaped JSON is never larger than its escaped version.
@@ -1420,37 +1269,31 @@ do_utf17:
             }
             else if(BOOST_JSON_UNLIKELY(
                 is_control(c)))
-            {
-                // invalid character
-                ec_ = error::syntax;
-                return result::fail;
-            }
+                return fail(cs.begin(), error::syntax);
             ++cs;
             continue;
         }
-        if(BOOST_JSON_LIKELY(more_))
+        if(BOOST_JSON_UNLIKELY(! more_))
+            return maybe_suspend(cs.begin(), state::str1);
+        if(BOOST_JSON_LIKELY(
+            cs.begin() > start))
         {
-            if(BOOST_JSON_LIKELY(
-                cs.data() > start))
+            if(is_key_)
             {
-                if(is_key_)
-                {
-                    if(BOOST_JSON_UNLIKELY(
-                        ! h.on_key_part({start,
-                            cs.used(start)}, ec_)))
-                        return result::fail;
-                }
-                else
-                {
-                    if(BOOST_JSON_UNLIKELY(
-                        ! h.on_string_part({start,
-                            cs.used(start)}, ec_)))
-                        return result::fail;
-                }
+                if(BOOST_JSON_UNLIKELY(
+                    ! h_.on_key_part({start,
+                        cs.used(start)}, ec_)))
+                    return fail(cs.begin());
             }
-            suspend(state::str1);
+            else
+            {
+                if(BOOST_JSON_UNLIKELY(
+                    ! h_.on_string_part({start,
+                        cs.used(start)}, ec_)))
+                    return fail(cs.begin());
+            }
         }
-        return result::partial;
+        return suspend(cs.begin(), state::str1);
     }
 
     //---------------------------------------------------------------
@@ -1478,32 +1321,27 @@ do_str2:
                 if(is_key_)
                 {
                     if(BOOST_JSON_UNLIKELY(
-                        ! h.on_key(temp, ec_)))
-                        return result::fail;
+                        ! h_.on_key(temp, ec_)))
+                        return fail(cs.begin());
                     is_key_ = false;
                 }
                 else
                 {
                     if(BOOST_JSON_UNLIKELY(
-                        ! h.on_string(temp, ec_)))
-                        return result::fail;
+                        ! h_.on_string(temp, ec_)))
+                        return fail(cs.begin());
                 }
                 ++cs;
-                return result::ok;
+                return cs.begin();
             }
             else if(! AllowBadUTF8 &&
                 (c & 0x80))
             {
 do_utf18:
-                start = cs.data();
-                const result r = 
-                    validate_utf8<StackEmpty>(cs);
-                if(BOOST_JSON_UNLIKELY(r))
-                {
-                    if(more_ && r == result::partial)
-                        suspend(state::utf18);
-                    return r;
-                }
+                start = cs.begin();
+                cs = validate_utf8<StackEmpty>(cs.begin(), cs.end());
+                if(BOOST_JSON_UNLIKELY(incomplete(cs)))
+                    return suspend_or_fail(state::utf18);
                 temp.append(start, cs.used(start));
                 continue;
             }
@@ -1512,12 +1350,9 @@ do_utf18:
                 ++cs;
                 goto do_str3;
             }
-            else if(is_control(c))
-            {
-                // invalid character
-                ec_ = error::syntax;
-                return result::fail;
-            }
+            else if(BOOST_JSON_UNLIKELY(
+                is_control(c)))
+                return fail(cs.begin(), error::syntax);
             temp.push_back(c);
             ++cs;
             continue;
@@ -1529,23 +1364,21 @@ do_utf18:
             if(is_key_)
             {
                 if(BOOST_JSON_UNLIKELY(
-                    ! h.on_key_part(temp, ec_)))
-                    return result::fail;
+                    ! h_.on_key_part(temp, ec_)))
+                    return fail(cs.begin());
             }
             else
             {
                 if(BOOST_JSON_UNLIKELY(
-                    ! h.on_string_part(temp, ec_)))
-                    return result::fail;
+                    ! h_.on_string_part(temp, ec_)))
+                    return fail(cs.begin());
             }
             temp.clear();
         }
         cs.clip(temp.max_size());
-        if(BOOST_JSON_LIKELY(cs))
-            continue;
-        if(BOOST_JSON_LIKELY(more_))
-            suspend(state::str2);
-        return result::partial;
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::str2);
+        continue;
 
         // handle escaped character
 do_str3:
@@ -1587,7 +1420,7 @@ do_str3:
                 {
                     int32_t d;
                     std::memcpy(
-                        &d, cs.data() + 1, 4);
+                        &d, p + 1, 4);
 #ifdef BOOST_JSON_BIG_ENDIAN
                     int d1 = hex_digit(static_cast<
                         unsigned char>(d >> 24));
@@ -1616,8 +1449,8 @@ do_str3:
                             ++cs;
                         if(d3 != -1)
                             ++cs;
-                        ec_ = error::expected_hex_digit;
-                        return result::fail;
+                        return fail(
+                            cs.begin(), error::expected_hex_digit);
                     }
                     // 32 bit unicode scalar value
                     unsigned const u1 =
@@ -1630,29 +1463,21 @@ do_str3:
                     if(BOOST_JSON_LIKELY(
                         u1 < 0xd800 || u1 > 0xdfff))
                     {
-                        cs.skip(5);
+                        cs += 5;
                         temp.append_utf8(u1);
                         continue;
                     }
                     if(u1 > 0xdbff)
-                    {
-                        ec_ = error::illegal_leading_surrogate;
-                        return result::fail;
-                    }
-                    cs.skip(5);
+                        return fail(
+                            cs.begin(), error::illegal_leading_surrogate);
+                    cs += 5;
                     if(BOOST_JSON_UNLIKELY(*cs != '\\'))
-                    {
-                        ec_ = error::syntax;
-                        return result::fail;
-                    }
+                        return fail(cs.begin(), error::syntax);
                     ++cs;
                     if(BOOST_JSON_UNLIKELY(*cs != 'u'))
-                    {
-                        ec_ = error::syntax;
-                        return result::fail;
-                    }
+                        return fail(cs.begin(), error::syntax);
                     ++cs;
-                    std::memcpy(&d, cs.data(), 4);
+                    std::memcpy(&d, cs.begin(), 4);
 #ifdef BOOST_JSON_BIG_ENDIAN
                     d1 = hex_digit(static_cast<
                         unsigned char>(d >> 24));
@@ -1681,8 +1506,8 @@ do_str3:
                             ++cs;
                         if(d3 != -1)
                             ++cs;
-                        ec_ = error::expected_hex_digit;
-                        return result::fail;
+                        return fail(
+                            cs.begin(), error::expected_hex_digit);
                     }
                     unsigned const u2 =
                         (d1 << 12) + (d2 << 8) +
@@ -1690,11 +1515,9 @@ do_str3:
                     // valid trailing surrogates are [DC00, DFFF]
                     if(BOOST_JSON_UNLIKELY(
                         u2 < 0xdc00 || u2 > 0xdfff))
-                    {
-                        ec_ = error::illegal_trailing_surrogate;
-                        return result::fail;
-                    }
-                    cs.skip(4);
+                        return fail(
+                            cs.begin(), error::illegal_leading_surrogate);
+                    cs += 4;
                     unsigned cp =
                         ((u1 - 0xd800) << 10) +
                          (u2  - 0xdc00) +
@@ -1710,14 +1533,14 @@ do_str3:
                     if(is_key_)
                     {
                         if(BOOST_JSON_UNLIKELY(
-                            ! h.on_key_part(temp, ec_)))
-                            return result::fail;
+                            ! h_.on_key_part(temp, ec_)))
+                            return fail(cs.begin());
                     }
                     else
                     {
                         if(BOOST_JSON_UNLIKELY(
-                            ! h.on_string_part(temp, ec_)))
-                            return result::fail;
+                            ! h_.on_string_part(temp, ec_)))
+                            return fail(cs.begin());
                     }
                     temp.clear();
                     cs.clip(temp.max_size());
@@ -1726,8 +1549,7 @@ do_str3:
                 goto do_str4;
 
             default:
-                ec_ = error::syntax;
-                return result::fail;
+                return fail(cs.begin(), error::syntax);
             }
             ++cs;
             continue;
@@ -1739,95 +1561,65 @@ do_str3:
             if(is_key_)
             {
                 if(BOOST_JSON_UNLIKELY(
-                    ! h.on_key_part(temp, ec_)))
-                    return result::fail;
+                    ! h_.on_key_part(temp, ec_)))
+                    return fail(cs.begin());
             }
             else
             {
                 if(BOOST_JSON_UNLIKELY(
-                    ! h.on_string_part(temp, ec_)))
-                    return result::fail;
+                    ! h_.on_string_part(temp, ec_)))
+                    return fail(cs.begin());
             }
             temp.clear();
         }
         cs.clip(temp.max_size());
-        if(BOOST_JSON_LIKELY(cs))
-            goto do_str3;
-        if(BOOST_JSON_LIKELY(more_))
-            suspend(state::str3);
-        return result::partial;
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::str3);
+        goto do_str3;
         // utf-16 escape
-    do_str4:
-        if(BOOST_JSON_LIKELY(cs))
+do_str4:
         {
+            if(BOOST_JSON_UNLIKELY(! cs))
+                return maybe_suspend(cs.begin(), state::str4);
             int const d = hex_digit(*cs);
             if(d == -1)
-            {
-                ec_ = error::expected_hex_digit;
-                return result::fail;
-            }
+                return fail(
+                    cs.begin(), error::expected_hex_digit);
             ++cs;
             u1_ = d << 12;
         }
-        else
+do_str5:
         {
-            if(BOOST_JSON_LIKELY(more_))
-                suspend(state::str4);
-            return result::partial;
-        }
-    do_str5:
-        if(BOOST_JSON_LIKELY(cs))
-        {
+            if(BOOST_JSON_UNLIKELY(! cs))
+                return maybe_suspend(cs.begin(), state::str5);
             int const d = hex_digit(*cs);
             if(d == -1)
-            {
-                ec_ = error::expected_hex_digit;
-                return result::fail;
-            }
+                return fail(
+                    cs.begin(), error::expected_hex_digit);
             ++cs;
             u1_ += d << 8;
         }
-        else
+do_str6:
         {
-            if(BOOST_JSON_LIKELY(more_))
-                suspend(state::str5);
-            return result::partial;
-        }
-    do_str6:
-        if(BOOST_JSON_LIKELY(cs))
-        {
+            if(BOOST_JSON_UNLIKELY(! cs))
+                return maybe_suspend(cs.begin(), state::str6);
             int const d = hex_digit(*cs);
             if(d == -1)
-            {
-                ec_ = error::expected_hex_digit;
-                return result::fail;
-            }
+                return fail(
+                    cs.begin(), error::expected_hex_digit);
             ++cs;
             u1_ += d << 4;
         }
-        else
+do_str7:
         {
-            if(BOOST_JSON_LIKELY(more_))
-                suspend(state::str6);
-            return result::partial;
-        }
-    do_str7:
-        if(BOOST_JSON_LIKELY(cs))
-        {
+            if(BOOST_JSON_UNLIKELY(! cs))
+                return maybe_suspend(cs.begin(), state::str7);
             int const d = hex_digit(*cs);
             if(d == -1)
-            {
-                ec_ = error::expected_hex_digit;
-                return result::fail;
-            }
+                return fail(
+                    cs.begin(), error::expected_hex_digit);
             ++cs;
             u1_ += d;
-        }
-        else
-        {
-            if(BOOST_JSON_LIKELY(more_))
-                suspend(state::str7);
-            return result::partial;
         }
         if( u1_ < 0xd800 ||
             u1_ > 0xdfff)
@@ -1838,120 +1630,68 @@ do_str3:
             continue;
         }
         if(u1_ > 0xdbff)
+            return fail(
+                cs.begin(), error::illegal_leading_surrogate);
+do_sur1:
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::sur1);
+        if(BOOST_JSON_UNLIKELY(*cs != '\\'))
+            return fail(cs.begin(), error::syntax);
+        ++cs;
+do_sur2:
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::sur2);
+        if(BOOST_JSON_UNLIKELY(*cs != 'u'))
+            return fail(cs.begin(), error::syntax);
+        ++cs;
+do_sur3:
         {
-            ec_ = error::illegal_leading_surrogate;
-            return result::fail;
-        }
-    do_sur1:
-        if(BOOST_JSON_LIKELY(cs))
-        {
-            if(BOOST_JSON_UNLIKELY(*cs != '\\'))
-            {
-                ec_ = error::syntax;
-                return result::fail;
-            }
-            ++cs;
-        }
-        else
-        {
-            if(BOOST_JSON_LIKELY(more_))
-                suspend(state::sur1);
-            return result::partial;
-        }
-    do_sur2:
-        if(BOOST_JSON_LIKELY(cs))
-        {
-            if(BOOST_JSON_UNLIKELY(*cs != 'u'))
-            {
-                ec_ = error::syntax;
-                return result::fail;
-            }
-            ++cs;
-        }
-        else
-        {
-            if(BOOST_JSON_LIKELY(more_))
-                suspend(state::sur2);
-            return result::partial;
-        }
-    do_sur3:
-        if(BOOST_JSON_LIKELY(cs))
-        {
+            if(BOOST_JSON_UNLIKELY(! cs))
+                return maybe_suspend(cs.begin(), state::sur3);
             int const d = hex_digit(*cs);
             if(d == -1)
-            {
-                ec_ = error::expected_hex_digit;
-                return result::fail;
-            }
+                return fail(
+                    cs.begin(), error::expected_hex_digit);
             ++cs;
             u2_ = d << 12;
         }
-        else
+do_sur4:
         {
-            if(BOOST_JSON_LIKELY(more_))
-                suspend(state::sur3);
-            return result::partial;
-        }
-    do_sur4:
-        if(BOOST_JSON_LIKELY(cs))
-        {
+            if(BOOST_JSON_UNLIKELY(! cs))
+                return maybe_suspend(cs.begin(), state::sur4);
             int const d = hex_digit(*cs);
             if(d == -1)
-            {
-                ec_ = error::expected_hex_digit;
-                return result::fail;
-            }
+                return fail(
+                    cs.begin(), error::expected_hex_digit);
             ++cs;
             u2_ += d << 8;
         }
-        else
+do_sur5:
         {
-            if(BOOST_JSON_LIKELY(more_))
-                suspend(state::sur4);
-            return result::partial;
-        }
-    do_sur5:
-        if(BOOST_JSON_LIKELY(cs))
-        {
+            if(BOOST_JSON_UNLIKELY(! cs))
+                return maybe_suspend(cs.begin(), state::sur5);
             int const d = hex_digit(*cs);
             if(d == -1)
-            {
-                ec_ = error::expected_hex_digit;
-                return result::fail;
-            }
+                return fail(
+                    cs.begin(), error::expected_hex_digit);
             ++cs;
             u2_ += d << 4;
         }
-        else
+do_sur6:
         {
-            if(BOOST_JSON_LIKELY(more_))
-                suspend(state::sur5);
-            return result::partial;
-        }
-    do_sur6:
-        if(BOOST_JSON_LIKELY(cs))
-        {
+            if(BOOST_JSON_UNLIKELY(! cs))
+                return maybe_suspend(cs.begin(), state::sur6);
             int const d = hex_digit(*cs);
             if(d == -1)
-            {
-                ec_ = error::expected_hex_digit;
-                return result::fail;
-            }
+                return fail(
+                    cs.begin(), error::expected_hex_digit);
             ++cs;
             u2_ += d;
         }
-        else
-        {
-            if(BOOST_JSON_LIKELY(more_))
-                suspend(state::sur6);
-            return result::partial;
-        }
         if(BOOST_JSON_UNLIKELY(
             u2_ < 0xdc00 || u2_ > 0xdfff))
-        {
-            ec_ = error::illegal_trailing_surrogate;
-            return result::fail;
-        }
+            return fail(
+                cs.begin(), error::expected_hex_digit);
         unsigned cp =
             ((u1_ - 0xd800) << 10) +
              (u2_ - 0xdc00) +
@@ -1964,36 +1704,20 @@ do_str3:
 
 //----------------------------------------------------------
 
+template<class Handler>
 template<
     bool StackEmpty,
     bool AllowComments,
     bool AllowTrailing,
-    bool AllowBadUTF8,
-    class Handler>
-auto
-basic_parser::
-parse_object(
-    Handler& h,
-    const_stream& cs) ->
-        result
+    bool AllowBadUTF8>
+const char*
+basic_parser<Handler>::
+parse_object(const char* p)
 {
-    if(StackEmpty || st_.empty())
+    detail::const_stream_wrapper cs(p, end_);
+    if(! StackEmpty && ! st_.empty())
     {
-        BOOST_ASSERT(*cs == '{');
-        ++depth_;
-        if(BOOST_JSON_UNLIKELY(
-            depth_ > max_depth_))
-        {
-            ec_ = error::too_deep;
-            return result::fail;
-        }
-        if(BOOST_JSON_UNLIKELY(
-            ! h.on_object_begin(ec_)))
-            return result::fail;
-        ++cs;
-    }
-    else
-    {
+        // resume
         state st;
         st_.pop(st);
         switch(st)
@@ -2006,199 +1730,144 @@ parse_object(
         case state::obj5: goto do_obj5;
         case state::obj6: goto do_obj6;
         case state::obj7: goto do_obj7;
-        case state::com6: goto do_com6;
-        case state::com7: goto do_com7;
-        case state::com8: goto do_com8;
-        case state::com9: goto do_com9;
+        case state::obj8: goto do_obj8;
+        case state::obj9: goto do_obj9;
+        case state::obj10: goto do_obj10;
+        case state::obj11: goto do_obj11;
         }
     }
-do_obj1:
+    BOOST_ASSERT(*cs == '{');
+    if(BOOST_JSON_UNLIKELY(! depth_))
+        return fail(cs.begin(), error::too_deep);
+    --depth_;
     if(BOOST_JSON_UNLIKELY(
-        ! skip_white(cs)))
-    {
-        if(BOOST_JSON_LIKELY(more_))
-            suspend(state::obj1);
-        return result::partial;
-    }
+        ! h_.on_object_begin(ec_)))
+        return fail(cs.begin());
+    ++cs;
+    // object:
+    //     '{' *ws '}'
+    //     '{' *ws string *ws ':' *ws value *ws *[ ',' *ws string *ws ':' *ws value *ws ] '}'
+do_obj1:
+    cs = detail::count_whitespace(cs.begin(), cs.end());
+    if(BOOST_JSON_UNLIKELY(! cs))
+        return maybe_suspend(cs.begin(), state::obj1);
     if(BOOST_JSON_LIKELY(*cs != '}'))
     {
-        if (AllowComments && *cs == '/')
+        if(BOOST_JSON_UNLIKELY(*cs != '\x22'))
         {
-do_com6:
-            const result r =
-                parse_comment<StackEmpty, false, false,
-                    AllowTrailing, AllowBadUTF8>(h, cs);
-            if (BOOST_JSON_LIKELY(!r))
-                goto do_obj1;
-            else if (more_ && r == result::partial)
-                suspend(state::com6);
-            return r;
-        }
-        for(;;)
-        {
-            if (BOOST_JSON_LIKELY(*cs == '\x22')) // '"'
+            if(AllowComments && *cs == '/')
             {
-                is_key_ = true;
 do_obj2:
-                const result r = 
-                    parse_string<StackEmpty, AllowBadUTF8>(h, cs);
-                if(BOOST_JSON_UNLIKELY(r))
-                {
-                    if(BOOST_JSON_LIKELY(more_ &&
-                        r == result::partial))
-                        suspend(state::obj2);
-                    return r;
-                }
+                cs = parse_comment<StackEmpty, false, false,
+                    AllowTrailing, AllowBadUTF8>(cs.begin());
+                if(BOOST_JSON_UNLIKELY(incomplete(cs)))
+                    return suspend_or_fail(state::obj2);
+                goto do_obj1;
             }
-            else if (AllowComments && *cs == '/')
-            {
-do_com7:
-                const result r =
-                    parse_comment<StackEmpty, false, false,
-                        AllowTrailing, AllowBadUTF8>(h, cs);
-                if (BOOST_JSON_LIKELY(!r))
-                    goto do_obj7;
-                else if (more_ && r == result::partial)
-                    suspend(state::com7);
-                return r;
-            }
-            else
-            {
-                ec_ = error::syntax;
-                return result::fail;
-            }
-do_obj3:
-            if(BOOST_JSON_UNLIKELY(
-                ! skip_white(cs)))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::obj3);
-                return result::partial;
-            }
-            if(BOOST_JSON_UNLIKELY(*cs != ':'))
-            {
-                if (AllowComments && *cs == '/')
-                {
-do_com8:
-                    const result r =
-                        parse_comment<StackEmpty, false, false,
-                            AllowTrailing, AllowBadUTF8>(h, cs);
-                    if (BOOST_JSON_LIKELY(!r))
-                        goto do_obj3;
-                    else if (more_ && r == result::partial)
-                        suspend(state::com8);
-                    return r;
-                }
-                ec_ = error::syntax;
-                return result::fail;
-            }
-            ++cs;
-do_obj4:
-            if(BOOST_JSON_UNLIKELY(
-                ! skip_white(cs)))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::obj4);
-                return result::partial;
-            }
-do_obj5:
-            {
-                const result r = 
-                    parse_value<StackEmpty, AllowComments, 
-                        AllowTrailing, AllowBadUTF8>(h, cs);
-                if(BOOST_JSON_UNLIKELY(r))
-                {
-                    if(BOOST_JSON_LIKELY(more_ &&
-                        r == result::partial))
-                        suspend(state::obj5);
-                    return r;
-                }
-            }
-do_obj6:
-            if(BOOST_JSON_UNLIKELY(
-                ! skip_white(cs)))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::obj6);
-                return result::partial;
-            }
-            // KRYSTIAN NOTE: do not place an optimization
-            // hint here, it will give worse codegen for
-            // the nominal return path
-            if(*cs != ',')
-            {
-                if(BOOST_JSON_LIKELY(*cs == '}'))
-                    break;
-                else if (AllowComments && *cs == '/')
-                {
-do_com9:
-                    const result r =
-                        parse_comment<StackEmpty, false, false,
-                            AllowTrailing, AllowBadUTF8>(h, cs);
-                    if (BOOST_JSON_LIKELY(!r))
-                        goto do_obj6;
-                    else if (more_ && r == result::partial)
-                        suspend(state::com9);
-                    return r;
-                }
-                ec_ = error::syntax;
-                return result::fail;
-            }
-            ++cs;
-do_obj7:
-            if(BOOST_JSON_UNLIKELY(
-                ! skip_white(cs)))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::obj7);
-                return result::partial;
-            }
-            if (AllowTrailing && *cs == '}')
-                break;
+            return fail(cs.begin(), error::syntax);
         }
-    }
-    if(BOOST_JSON_LIKELY(
-        h.on_object_end(ec_)))
-    {
-        --depth_;
+do_obj3:
+        // object is not empty, key required
+        is_key_ = true;
+        cs = parse_string<StackEmpty,
+            AllowBadUTF8>(cs.begin());
+        if(BOOST_JSON_UNLIKELY(incomplete(cs)))
+            return suspend_or_fail(state::obj3);
+do_obj4:
+        cs = detail::count_whitespace(cs.begin(), cs.end());
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::obj4);
+        if(BOOST_JSON_UNLIKELY(*cs != ':'))
+        {
+            if(AllowComments && *cs == '/')
+            {
+do_obj5:
+                cs = parse_comment<StackEmpty, false, false,
+                    AllowTrailing, AllowBadUTF8>(cs.begin());
+                if(BOOST_JSON_UNLIKELY(incomplete(cs)))
+                    return suspend_or_fail(state::obj5);
+                goto do_obj4;
+            }
+            return fail(cs.begin(), error::syntax);
+        }
         ++cs;
-        return result::ok;
+do_obj6:
+        cs = detail::count_whitespace(cs.begin(), cs.end());
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::obj6);
+do_obj7:
+        cs = parse_value<StackEmpty, AllowComments, 
+            AllowTrailing, AllowBadUTF8>(cs.begin());
+        if(BOOST_JSON_UNLIKELY(incomplete(cs)))
+            return suspend_or_fail(state::obj7);
+do_obj8:
+        cs = detail::count_whitespace(cs.begin(), cs.end());
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::obj8);
+        if(BOOST_JSON_LIKELY(*cs == ','))
+        {
+            ++cs;
+do_obj9:
+            cs = detail::count_whitespace(cs.begin(), cs.end());
+            if(BOOST_JSON_UNLIKELY(! cs))
+                return maybe_suspend(cs.begin(), state::obj9);
+
+            // loop for next element
+            if(BOOST_JSON_LIKELY(*cs == '\x22'))
+                goto do_obj3;
+            if(! AllowTrailing || *cs != '}')
+            {
+                if(AllowComments && *cs == '/')
+                {
+do_obj10:
+                    cs = parse_comment<StackEmpty, false, false,
+                        AllowTrailing, AllowBadUTF8>(cs.begin());
+                    if(BOOST_JSON_UNLIKELY(incomplete(cs)))
+                        return suspend_or_fail(state::obj10);
+                    goto do_obj9;
+                }
+                return fail(cs.begin(), error::syntax);
+            }
+        }
+        else if(BOOST_JSON_UNLIKELY(*cs != '}'))
+        {
+            if(AllowComments && *cs == '/')
+            {
+do_obj11:
+                cs = parse_comment<StackEmpty, false, false,
+                    AllowTrailing, AllowBadUTF8>(cs.begin());
+                if(BOOST_JSON_UNLIKELY(incomplete(cs)))
+                    return suspend_or_fail(state::obj11);
+                goto do_obj8;
+            }
+            return fail(cs.begin(), error::syntax);
+        }
+        // got closing brace, fall through
     }
-    return result::fail;
+    if(BOOST_JSON_UNLIKELY(
+        ! h_.on_object_end(ec_)))
+        return fail(cs.begin());
+    --depth_;
+    ++cs;
+    return cs.begin();
 }
 
 //----------------------------------------------------------
 
+template<class Handler>
 template<
     bool StackEmpty,
     bool AllowComments,
     bool AllowTrailing,
-    bool AllowBadUTF8,
-    class Handler>
-auto
-basic_parser::
-parse_array(
-    Handler& h,
-    const_stream& cs) ->
-        result
+    bool AllowBadUTF8>
+const char*
+basic_parser<Handler>::
+parse_array(const char* p)
 {
-    if(StackEmpty || st_.empty())
+    detail::const_stream_wrapper cs(p, end_);
+    if(! StackEmpty && ! st_.empty())
     {
-        BOOST_ASSERT(*cs == '[');
-        ++depth_;
-        if(BOOST_JSON_UNLIKELY(
-            depth_ > max_depth_))
-        {
-            ec_ = error::too_deep;
-            return result::fail;
-        }
-        if(BOOST_JSON_UNLIKELY(
-            ! h.on_array_begin(ec_)))
-            return result::fail;
-        ++cs;
-    }
-    else
-    {
+        // resume
         state st;
         st_.pop(st);
         switch(st)
@@ -2208,109 +1877,88 @@ parse_array(
         case state::arr2: goto do_arr2;
         case state::arr3: goto do_arr3;
         case state::arr4: goto do_arr4;
-        case state::com10: goto do_com10;
-        case state::com11: goto do_com11;
+        case state::arr5: goto do_arr5;
+        case state::arr6: goto do_arr6;
         }
     }
-do_arr1:
+    BOOST_ASSERT(*cs == '[');
+    if(BOOST_JSON_UNLIKELY(! depth_))
+        return fail(cs.begin(), error::too_deep);
+    --depth_;
     if(BOOST_JSON_UNLIKELY(
-        ! skip_white(cs)))
-    {
-        if(BOOST_JSON_LIKELY(more_))
-            suspend(state::arr1);
-        return result::partial;
-    }
+        ! h_.on_array_begin(ec_)))
+        return fail(cs.begin());
+    ++cs;
+    // array:
+    //     '[' *ws ']'
+    //     '[' *ws value *ws *[ ',' *ws value *ws ] ']'
+do_arr1:
+    cs = detail::count_whitespace(cs.begin(), cs.end());
+    if(BOOST_JSON_UNLIKELY(! cs))
+        return maybe_suspend(cs.begin(), state::arr1);
     if(BOOST_JSON_LIKELY(*cs != ']'))
     {
-        if (AllowComments && *cs == '/')
-        {
-do_com10:
-           const result r =
-                parse_comment<StackEmpty, false, false,
-                    AllowTrailing, AllowBadUTF8>(h, cs);
-            if (BOOST_JSON_LIKELY(!r))
-                goto do_arr1;
-            else if (more_ && r == result::partial)
-                suspend(state::com10);
-            return r;
-        }
-        for(;;)
+        if(AllowComments && *cs == '/')
         {
 do_arr2:
-            {
-                const result r = 
-                    parse_value<StackEmpty, AllowComments, 
-                        AllowTrailing, AllowBadUTF8>(h, cs);
-                if(BOOST_JSON_UNLIKELY(r))
-                {
-                    if(BOOST_JSON_LIKELY(more_ &&
-                        r == result::partial))
-                        suspend(state::arr2);
-                    return r;
-                }
-            }
-do_arr3:
-            if(BOOST_JSON_UNLIKELY(
-                ! skip_white(cs)))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::arr3);
-                return result::partial;
-            }
-            // KRYSTIAN NOTE: do not place an optimization
-            // hint here, it will give worse codegen for
-            // the nominal return path
-            if(*cs != ',')
-            {
-                if(BOOST_JSON_LIKELY(*cs == ']'))
-                    break;
-                else if (AllowComments && *cs == '/')
-                {
-do_com11:
-                    const result r =
-                        parse_comment<StackEmpty, false, false,
-                            AllowTrailing, AllowBadUTF8>(h, cs);
-                    if (BOOST_JSON_LIKELY(!r))
-                        goto do_arr3;
-                    else if (more_ && r == result::partial)
-                        suspend(state::com11);
-                    return r;
-                }
-                ec_ = error::syntax;
-                return result::fail;
-            }
-            ++cs;
-do_arr4:
-            if(BOOST_JSON_UNLIKELY(
-                ! skip_white(cs)))
-            {
-                if(BOOST_JSON_LIKELY(more_))
-                    suspend(state::arr4);
-                return result::partial;
-            }
-            if (AllowTrailing && *cs == ']')
-                break;
+            cs = parse_comment<StackEmpty, false, false,
+                AllowTrailing, AllowBadUTF8>(cs.begin());
+            if(BOOST_JSON_UNLIKELY(incomplete(cs)))
+                return suspend_or_fail(state::arr2);
+            goto do_arr1;
         }
+do_arr3:
+        // array is not empty, value required
+        cs = parse_value<StackEmpty, AllowComments, 
+            AllowTrailing, AllowBadUTF8>(cs.begin());
+        if(BOOST_JSON_UNLIKELY(incomplete(cs)))
+            return suspend_or_fail(state::arr3);
+do_arr4:
+        cs = detail::count_whitespace(cs.begin(), cs.end());
+        if(BOOST_JSON_UNLIKELY(! cs))
+            return maybe_suspend(cs.begin(), state::arr4);
+        if(BOOST_JSON_LIKELY(*cs == ','))
+        {
+            ++cs;
+do_arr5:
+            cs = detail::count_whitespace(cs.begin(), cs.end());
+            if(BOOST_JSON_UNLIKELY(! cs))
+                return maybe_suspend(cs.begin(), state::arr5);
+
+            // loop for next element
+            if(! AllowTrailing || *cs != ']')
+                goto do_arr3;
+        }
+        else if(BOOST_JSON_UNLIKELY(*cs != ']'))
+        {
+            if(AllowComments && *cs == '/')
+            {
+do_arr6:
+                cs = parse_comment<StackEmpty, false, false,
+                    AllowTrailing, AllowBadUTF8>(cs.begin());
+                if(BOOST_JSON_UNLIKELY(incomplete(cs)))
+                    return suspend_or_fail(state::arr6);
+                goto do_arr4;
+            }
+            return fail(cs.begin(), error::syntax);
+        }
+        // got closing bracket; fall through
     }
-    if (BOOST_JSON_LIKELY(
-        h.on_array_end(ec_)))
-    {
-        --depth_;
-        ++cs;
-        return result::ok;
-    }
-    return result::fail;
+    if(BOOST_JSON_UNLIKELY(
+        ! h_.on_array_end(ec_)))
+        return fail(cs.begin());
+    --depth_;
+    ++cs;
+    return cs.begin();
 }
 
 //----------------------------------------------------------
 
-template<bool StackEmpty, char First, class Handler>
-auto
-basic_parser::
-parse_number(
-    Handler& h,
-    const_stream& cs0) ->
-        result
+template<class Handler>
+template<bool StackEmpty, char First>
+const char*
+basic_parser<Handler>::
+parse_number(const char* p)
 {
     // only one of these will be true if we are not resuming
     // if negative then !zero_first && !nonzero_first
@@ -2319,14 +1967,121 @@ parse_number(
     constexpr bool negative = First == '-';
     constexpr bool zero_first = First == '0';
     constexpr bool nonzero_first = First == '+';
+    detail::const_stream_wrapper cs(p, end_);
     number num;
-    detail::local_const_stream cs(cs0);
-    const char* begin = cs.data();
+    const char* begin = cs.begin();
     if(StackEmpty || st_.empty())
     {
         num.bias = 0;
         num.exp = 0;
         num.frac = false;
+
+        //----------------------------------
+        //
+        // '-'
+        // leading minus sign
+        //
+        BOOST_ASSERT(cs);
+        if(negative)
+            ++cs;
+
+        num.neg = negative;
+        num.frac = false;
+        num.exp = 0;
+        num.bias = 0;
+
+        // fast path
+        if( cs.remain() >= 16 + 1 + 16 ) // digits . digits
+        {
+            int n1;
+
+            if( nonzero_first || 
+                (negative && *cs != '0') )
+            {
+                n1 = detail::count_digits( cs.begin() );
+                BOOST_ASSERT(n1 >= 0 && n1 <= 16);
+
+                if( ! nonzero_first && n1 == 0 )
+                {
+                    // digit required
+                    return fail(cs.begin(), error::syntax);
+                }
+
+                num.mant = detail::parse_unsigned( 0, cs.begin(), n1 );
+
+                cs += n1;
+
+                // integer or floating-point with 
+                // >= 16 leading digits
+                if( n1 == 16 )
+                {
+                    goto do_num2;
+                }
+            }
+            else
+            {
+                // 0. floating-point or 0e integer
+                num.mant = 0;
+                n1 = 0;
+                ++cs;
+            }
+
+            {
+                const char c = *cs;
+                if(c != '.')
+                {
+                    if((c | 32) == 'e')
+                    {
+                        ++cs;
+                        goto do_exp1;
+                    }
+                    if(negative)
+                        num.mant = ~num.mant + 1;
+                    goto finish_signed;
+                }
+            }
+
+            // floating-point number
+
+            ++cs;
+
+            int n2 = detail::count_digits( cs.begin() );
+            BOOST_ASSERT(n2 >= 0 && n2 <= 16);
+
+            if( n2 == 0 )
+            {
+                // digit required
+                return fail(cs.begin(), error::syntax);
+            }
+
+            // floating-point mantissa overflow
+            if( n1 + n2 >= 19 )
+            {
+                goto do_num4;
+            }
+
+            num.mant = detail::parse_unsigned( num.mant, cs.begin(), n2 );
+
+            BOOST_ASSERT(num.bias == 0);
+
+            num.bias -= n2;
+
+            cs += n2;
+
+            char ch = *cs;
+
+            if( (ch | 32) == 'e' )
+            {
+                ++cs;
+                goto do_exp1;
+            }
+            else if( ch >= '0' && ch <= '9' )
+            {
+                goto do_num8;
+            }
+
+            goto finish_dub;
+        }
     }
     else
     {
@@ -2352,110 +2107,6 @@ parse_number(
 
     //----------------------------------
     //
-    // '-'
-    // leading minus sign
-    //
-    BOOST_ASSERT(cs);
-    if (negative)
-        ++cs;
-    num.neg = negative;
-
-    // fast path
-    if( cs.remain() >= 16 + 1 + 16 ) // digits . digits
-    {
-        int n1;
-
-        if( nonzero_first || 
-            (negative && *cs != '0') )
-        {
-            n1 = detail::count_digits( cs.data() );
-            BOOST_ASSERT(n1 >= 0 && n1 <= 16);
-
-            if( ! nonzero_first && n1 == 0 )
-            {
-                // digit required
-                ec_ = error::syntax;
-                return result::fail;
-            }
-
-            num.mant = detail::parse_unsigned( 0, cs.data(), n1 );
-
-            cs.skip( n1 );
-
-            // integer or floating-point with 
-            // >= 16 leading digits
-            if( n1 == 16 )
-            {
-                goto do_num2;
-            }
-        }
-        else
-        {
-            // 0. floating-point or 0e integer
-            num.mant = 0;
-            n1 = 0;
-            ++cs;
-        }
-
-        {
-            const char c = *cs;
-            if (c != '.')
-            {
-                if ((c | 32) == 'e')
-                {
-                    ++cs;
-                    goto do_exp1;
-                }
-                if (negative)
-                    num.mant = ~num.mant + 1;
-                goto finish_signed;
-            }
-        }
-
-        // floating-point number
-
-        ++cs;
-
-        int n2 = detail::count_digits( cs.data() );
-        BOOST_ASSERT(n2 >= 0 && n2 <= 16);
-
-        if( n2 == 0 )
-        {
-            // digit required
-            ec_ = error::syntax;
-            return result::fail;
-        }
-
-        // floating-point mantissa overflow
-        if( n1 + n2 >= 19 )
-        {
-            goto do_num4;
-        }
-
-        num.mant = detail::parse_unsigned( num.mant, cs.data(), n2 );
-
-        BOOST_ASSERT(num.bias == 0);
-        num.bias -= n2;
-
-        cs.skip( n2 );
-
-        char ch = *cs;
-
-        if( (ch | 32) == 'e' )
-        {
-            ++cs;
-            goto do_exp1;
-        }
-        else if( ch >= '0' && ch <= '9' )
-        {
-            goto do_num8;
-        }
-
-        goto finish_dub;
-    }
-
-    //----------------------------------
-    //
     // DIGIT
     // first digit
     //
@@ -2464,13 +2115,13 @@ do_num1:
         BOOST_JSON_LIKELY(cs))
     {
         char const c = *cs;
-        if (zero_first)
+        if(zero_first)
         {
             ++cs;
             num.mant = 0;
             goto do_num6;
         }
-        else if (nonzero_first || BOOST_JSON_LIKELY(
+        else if(nonzero_first || BOOST_JSON_LIKELY(
             c >= '1' && c <= '9'))
         {
             ++cs;
@@ -2485,19 +2136,17 @@ do_num1:
         }
         else
         {
-            ec_ = error::syntax;
-            return result::fail;
+            return fail(cs.begin(), error::syntax);
         }
     }
     else
     {
         if(BOOST_JSON_UNLIKELY(
-            ! h.on_number_part(
+            ! h_.on_number_part(
                 {begin, cs.used(begin)}, ec_)))
-            return result::fail;
-        if(more_)
-            suspend(state::num1, num);
-        return result::partial;
+            return fail(cs.begin());
+        return maybe_suspend(
+            cs.begin(), state::num1, num);
     }
 
     //----------------------------------
@@ -2510,68 +2159,63 @@ do_num2:
     {
         for(;;)
         {
-            if(BOOST_JSON_LIKELY(cs))
+            if(BOOST_JSON_UNLIKELY(! cs))
             {
-                char const c = *cs;
-                if(BOOST_JSON_LIKELY(
-                    c >= '0' && c <= '9'))
+                if(BOOST_JSON_UNLIKELY(more_))
                 {
-                    ++cs;
-                    //              9223372036854775808 INT64_MIN
-                    if( num.mant  > 922337203685477580 || (
-                        num.mant == 922337203685477580 && c > '8'))
-                        break;
-                    num.mant = 10 * num.mant + c - '0';
-                    continue;
+                    if(BOOST_JSON_UNLIKELY(
+                        ! h_.on_number_part(
+                            {begin, cs.used(begin)}, ec_)))
+                        return fail(cs.begin());
+                    return suspend(cs.begin(), state::num2, num);
                 }
-                goto do_num6; // [.eE]
+                goto finish_int;
             }
-            else if(BOOST_JSON_UNLIKELY(more_))
+            char const c = *cs;
+            if(BOOST_JSON_LIKELY(
+                c >= '0' && c <= '9'))
             {
-                if(BOOST_JSON_UNLIKELY(
-                    ! h.on_number_part(
-                        {begin, cs.used(begin)}, ec_)))
-                    return result::fail;
-                suspend(state::num2, num);
-                return result::partial;
+                ++cs;
+                //              9223372036854775808 INT64_MIN
+                if( num.mant  > 922337203685477580 || (
+                    num.mant == 922337203685477580 && c > '8'))
+                    break;
+                num.mant = 10 * num.mant + c - '0';
+                continue;
             }
-            goto finish_int;
+            goto do_num6; // [.eE]
         }
     }
     else
     {
         for(;;)
         {
-            if(BOOST_JSON_LIKELY(cs))
-            {
-                char const c = *cs;
-                if(BOOST_JSON_LIKELY(
-                    c >= '0' && c <= '9'))
-                {
-                    ++cs;
-                    //              18446744073709551615 UINT64_MAX
-                    if( num.mant  > 1844674407370955161 || (
-                        num.mant == 1844674407370955161 && c > '5'))
-                        break;
-                    num.mant = 10 * num.mant + c - '0';
-                }
-                else
-                {
-                    goto do_num6; // [.eE]
-                }
-            }
-            else
+            if(BOOST_JSON_UNLIKELY(! cs))
             {
                 if(BOOST_JSON_UNLIKELY(more_))
                 {
                     if(BOOST_JSON_UNLIKELY(
-                        ! h.on_number_part(
+                        ! h_.on_number_part(
                             {begin, cs.used(begin)}, ec_)))
-                        return result::fail;
-                    suspend(state::num2, num);
-                    return result::partial;
+                        return fail(cs.begin());
+                    return suspend(cs.begin(), state::num2, num);
                 }
                 goto finish_int;
+            }
+            char const c = *cs;
+            if(BOOST_JSON_LIKELY(
+                c >= '0' && c <= '9'))
+            {
+                ++cs;
+                //              18446744073709551615 UINT64_MAX
+                if( num.mant  > 1844674407370955161 || (
+                    num.mant == 1844674407370955161 && c > '5'))
+                    break;
+                num.mant = 10 * num.mant + c - '0';
+            }
+            else
+            {
+                goto do_num6; // [.eE]
             }
         }
     }
@@ -2585,43 +2229,39 @@ do_num2:
 do_num3:
     for(;;)
     {
-        if(BOOST_JSON_LIKELY(cs))
-        {
-            char const c = *cs;
-            if(BOOST_JSON_UNLIKELY(
-                c >= '0' && c <= '9'))
-            {
-                ++cs;
-                // VFALCO check overflow
-                ++num.bias;
-            }
-            else if(BOOST_JSON_LIKELY(
-                c == '.'))
-            {
-                ++cs;
-                break;
-            }
-            else if((c | 32) == 'e')
-            {
-                ++cs;
-                goto do_exp1;
-            }
-            else
-            {
-                goto finish_dub;
-            }
-        }
-        else
+        if(BOOST_JSON_UNLIKELY(! cs))
         {
             if(BOOST_JSON_UNLIKELY(more_))
             {
                 if(BOOST_JSON_UNLIKELY(
-                    ! h.on_number_part(
+                    ! h_.on_number_part(
                         {begin, cs.used(begin)}, ec_)))
-                    return result::fail;
-                suspend(state::num3, num);
-                return result::partial;
+                    return fail(cs.begin());
+                return suspend(cs.begin(), state::num3, num);
             }
+            goto finish_dub;
+        }
+        char const c = *cs;
+        if(BOOST_JSON_UNLIKELY(
+            c >= '0' && c <= '9'))
+        {
+            ++cs;
+            // VFALCO check overflow
+            ++num.bias;
+        }
+        else if(BOOST_JSON_LIKELY(
+            c == '.'))
+        {
+            ++cs;
+            break;
+        }
+        else if((c | 32) == 'e')
+        {
+            ++cs;
+            goto do_exp1;
+        }
+        else
+        {
             goto finish_dub;
         }
     }
@@ -2633,8 +2273,16 @@ do_num3:
     // to the right of decimal
     //
 do_num4:
-    if(BOOST_JSON_LIKELY(cs))
     {
+        if(BOOST_JSON_UNLIKELY(! cs))
+        {
+            if(BOOST_JSON_UNLIKELY(
+                ! h_.on_number_part(
+                    {begin, cs.used(begin)}, ec_)))
+                return fail(cs.begin());
+            return maybe_suspend(
+                cs.begin(), state::num4, num);
+        }
         char const c = *cs;
         if(BOOST_JSON_LIKELY(
             //static_cast<unsigned char>(c - '0') < 10))
@@ -2645,19 +2293,8 @@ do_num4:
         else
         {
             // digit required
-            ec_ = error::syntax;
-            return result::fail;
+            return fail(cs.begin(), error::syntax);
         }
-    }
-    else
-    {
-        if(BOOST_JSON_UNLIKELY(
-            ! h.on_number_part(
-                {begin, cs.used(begin)}, ec_)))
-            return result::fail;
-        if(BOOST_JSON_UNLIKELY(more_))
-            suspend(state::num4, num);
-        return result::partial;
     }
 
     //----------------------------------
@@ -2669,35 +2306,31 @@ do_num4:
 do_num5:
     for(;;)
     {
-        if(BOOST_JSON_LIKELY(cs))
-        {
-            char const c = *cs;
-            if(BOOST_JSON_LIKELY(
-                c >= '0' && c <= '9'))
-            {
-                ++cs;
-            }
-            else if((c | 32) == 'e')
-            {
-                ++cs;
-                goto do_exp1;
-            }
-            else
-            {
-                goto finish_dub;
-            }
-        }
-        else
+        if(BOOST_JSON_UNLIKELY(! cs))
         {
             if(BOOST_JSON_UNLIKELY(more_))
             {
                 if(BOOST_JSON_UNLIKELY(
-                    ! h.on_number_part(
+                    ! h_.on_number_part(
                         {begin, cs.used(begin)}, ec_)))
-                    return result::fail;
-                suspend(state::num5, num);
-                return result::partial;
+                    return fail(cs.begin());
+                return suspend(cs.begin(), state::num5, num);
             }
+            goto finish_dub;
+        }
+        char const c = *cs;
+        if(BOOST_JSON_LIKELY(
+            c >= '0' && c <= '9'))
+        {
+            ++cs;
+        }
+        else if((c | 32) == 'e')
+        {
+            ++cs;
+            goto do_exp1;
+        }
+        else
+        {
             goto finish_dub;
         }
     }
@@ -2707,8 +2340,19 @@ do_num5:
     // [.eE]
     //
 do_num6:
-    if(BOOST_JSON_LIKELY(cs))
     {
+        if(BOOST_JSON_UNLIKELY(! cs))
+        {
+            if(BOOST_JSON_UNLIKELY(more_))
+            {
+                if(BOOST_JSON_UNLIKELY(
+                    ! h_.on_number_part(
+                        {begin, cs.used(begin)}, ec_)))
+                    return fail(cs.begin());
+                return suspend(cs.begin(), state::num6, num);
+            }
+            goto finish_int;
+        }
         char const c = *cs;
         if(BOOST_JSON_LIKELY(
             c == '.'))
@@ -2725,19 +2369,6 @@ do_num6:
             goto finish_int;
         }
     }
-    else
-    {
-        if(BOOST_JSON_LIKELY(more_))
-        {
-            if(BOOST_JSON_UNLIKELY(
-                ! h.on_number_part(
-                    {begin, cs.used(begin)}, ec_)))
-                return result::fail;
-            suspend(state::num6, num);
-            return result::partial;
-        }
-        goto finish_int;
-    }
 
     //----------------------------------
     //
@@ -2746,31 +2377,27 @@ do_num6:
     // to the right of decimal
     //
 do_num7:
-    if(BOOST_JSON_LIKELY(cs))
     {
+        if(BOOST_JSON_UNLIKELY(! cs))
+        {
+            if(BOOST_JSON_UNLIKELY(more_))
+            {
+                if(BOOST_JSON_UNLIKELY(
+                    ! h_.on_number_part(
+                        {begin, cs.used(begin)}, ec_)))
+                    return fail(cs.begin());
+                return suspend(cs.begin(), state::num7, num);
+            }
+            // digit required
+            return fail(cs.begin(), error::syntax);
+        }
         char const c = *cs;
         if(BOOST_JSON_UNLIKELY(
             c < '0' || c > '9'))
         {
             // digit required
-            ec_ = error::syntax;
-            return result::fail;
+            return fail(cs.begin(), error::syntax);
         }
-    }
-    else
-    {
-        if(BOOST_JSON_UNLIKELY(more_))
-        {
-            if(BOOST_JSON_UNLIKELY(
-                ! h.on_number_part(
-                    {begin, cs.used(begin)}, ec_)))
-                return result::fail;
-            suspend(state::num7, num);
-            return result::partial;
-        }
-        // digit required
-        ec_ = error::syntax;
-        return result::fail;
     }
 
     //----------------------------------
@@ -2782,45 +2409,41 @@ do_num7:
 do_num8:
     for(;;)
     {
-        if(BOOST_JSON_LIKELY(cs))
-        {
-            char const c = *cs;
-            if(BOOST_JSON_LIKELY(
-                c >= '0' && c <= '9'))
-            {
-                ++cs;
-                if(BOOST_JSON_LIKELY(
-                    num.mant <= 9007199254740991)) // 2^53-1
-                {
-                    --num.bias;
-                    num.mant = 10 * num.mant + c - '0';
-                }
-                else
-                {
-                    goto do_num5;
-                }
-            }
-            else if((c | 32) == 'e')
-            {
-                ++cs;
-                goto do_exp1;
-            }
-            else
-            {
-                goto finish_dub;
-            }
-        }
-        else
+        if(BOOST_JSON_UNLIKELY(! cs))
         {
             if(BOOST_JSON_UNLIKELY(more_))
             {
                 if(BOOST_JSON_UNLIKELY(
-                    ! h.on_number_part(
+                    ! h_.on_number_part(
                         {begin, cs.used(begin)}, ec_)))
-                    return result::fail;
-                suspend(state::num8, num);
-                return result::partial;
+                    return fail(cs.begin());
+                return suspend(cs.begin(), state::num8, num);
             }
+            goto finish_dub;
+        }
+        char const c = *cs;
+        if(BOOST_JSON_LIKELY(
+            c >= '0' && c <= '9'))
+        {
+            ++cs;
+            if(BOOST_JSON_LIKELY(
+                num.mant <= 9007199254740991)) // 2^53-1
+            {
+                --num.bias;
+                num.mant = 10 * num.mant + c - '0';
+            }
+            else
+            {
+                goto do_num5;
+            }
+        }
+        else if((c | 32) == 'e')
+        {
+            ++cs;
+            goto do_exp1;
+        }
+        else
+        {
             goto finish_dub;
         }
     }
@@ -2830,27 +2453,23 @@ do_num8:
     // *[+-]
     //
 do_exp1:
-    if(BOOST_JSON_LIKELY(cs))
-    {
-        if(*cs == '+')
-        {
-            ++cs;
-        }
-        else if(*cs == '-')
-        {
-            ++cs;
-            num.frac = true;
-        }
-    }
-    else
+    if(BOOST_JSON_UNLIKELY(! cs))
     {
         if(BOOST_JSON_UNLIKELY(
-            ! h.on_number_part(
+            ! h_.on_number_part(
                 {begin, cs.used(begin)}, ec_)))
-            return result::fail;
-        if(BOOST_JSON_LIKELY(more_))
-            suspend(state::exp1, num);
-        return result::partial;
+            return fail(cs.begin());
+        return maybe_suspend(
+            cs.begin(), state::exp1, num);
+    }
+    if(*cs == '+')
+    {
+        ++cs;
+    }
+    else if(*cs == '-')
+    {
+        ++cs;
+        num.frac = true;
     }
 
     //----------------------------------
@@ -2859,33 +2478,29 @@ do_exp1:
     // first digit of the exponent
     //
 do_exp2:
-    if(BOOST_JSON_LIKELY(cs))
     {
+        if(BOOST_JSON_UNLIKELY(! cs))
+        {
+            if(BOOST_JSON_UNLIKELY(more_))
+            {
+                if(BOOST_JSON_UNLIKELY(
+                    ! h_.on_number_part(
+                        {begin, cs.used(begin)}, ec_)))
+                    return fail(cs.begin());
+                return suspend(cs.begin(), state::exp2, num);
+            }
+            // digit required
+           return fail(cs.begin(), error::syntax);
+        }
         char const c = *cs;
         if(BOOST_JSON_UNLIKELY(
             c < '0' || c > '9'))
         {
             // digit required
-            ec_ = error::syntax;
-            return result::fail;
+            return fail(cs.begin(), error::syntax);
         }
         ++cs;
         num.exp = c - '0';
-    }
-    else
-    {
-        if(BOOST_JSON_UNLIKELY(more_))
-        {
-            if(BOOST_JSON_UNLIKELY(
-                ! h.on_number_part(
-                    {begin, cs.used(begin)}, ec_)))
-                return result::fail;
-            suspend(state::exp2, num);
-            return result::partial;
-        }
-        // digit required
-        ec_ = error::syntax;
-        return result::fail;
     }
 
     //----------------------------------
@@ -2896,33 +2511,30 @@ do_exp2:
 do_exp3:
     for(;;)
     {
-        if(BOOST_JSON_LIKELY(cs))
+        if(BOOST_JSON_UNLIKELY(! cs))
         {
-            char const c = *cs;
-            if(BOOST_JSON_LIKELY(
-                c >= '0' && c <= '9'))
+            if(BOOST_JSON_UNLIKELY(more_))
             {
-                if(BOOST_JSON_UNLIKELY
-                //              2147483647 INT_MAX
-                    (num.exp  > 214748364 || (
-                     num.exp == 214748364 && c > '7')))
-                {
-                    ec_ = error::exponent_overflow;
-                    return result::fail;
-                }
-                ++cs;
-                num.exp = 10 * num.exp + c - '0';
-                continue;
+                if(BOOST_JSON_UNLIKELY(
+                    ! h_.on_number_part(
+                        {begin, cs.used(begin)}, ec_)))
+                    return fail(cs.begin());
+                return suspend(cs.begin(), state::exp3, num);
             }
+            goto finish_dub;
         }
-        else if(BOOST_JSON_UNLIKELY(more_))
+        char const c = *cs;
+        if(BOOST_JSON_LIKELY(
+            c >= '0' && c <= '9'))
         {
-            if(BOOST_JSON_UNLIKELY(
-                ! h.on_number_part(
-                    {begin, cs.used(begin)}, ec_)))
-                return result::fail;
-            suspend(state::exp3, num);
-            return result::partial;
+            if(BOOST_JSON_UNLIKELY
+            //              2147483647 INT_MAX
+                (num.exp  > 214748364 || (
+                    num.exp == 214748364 && c > '7')))
+                return fail(cs.begin(), error::exponent_overflow);
+            ++cs;
+            num.exp = 10 * num.exp + c - '0';
+            continue;
         }
         goto finish_dub;
     }
@@ -2931,25 +2543,24 @@ finish_int:
     if(negative || (!StackEmpty && num.neg))
     {
         if(BOOST_JSON_UNLIKELY(
-            ! h.on_int64(static_cast<
+            ! h_.on_int64(static_cast<
                 int64_t>(~num.mant + 1), {begin, cs.used(begin)}, ec_)))
-            return result::fail;
-        return result::ok;
+            return fail(cs.begin());
+        return cs.begin();
     }
     if(num.mant <= INT64_MAX)
     {
 finish_signed:
         if(BOOST_JSON_UNLIKELY(
-            ! h.on_int64(static_cast<
+            ! h_.on_int64(static_cast<
                 int64_t>(num.mant), {begin, cs.used(begin)}, ec_)))
-            return result::fail;
-        return result::ok;
+            return fail(cs.begin());
+        return cs.begin();
     }
     if(BOOST_JSON_UNLIKELY(
-        ! h.on_uint64(num.mant, {begin, cs.used(begin)}, ec_)))
-        return result::fail;
-    return result::ok;
-
+        ! h_.on_uint64(num.mant, {begin, cs.used(begin)}, ec_)))
+        return fail(cs.begin());
+    return cs.begin();
 finish_dub:
     double const d = detail::dec_to_float(
         num.mant,
@@ -2957,23 +2568,29 @@ finish_dub:
             -num.exp : num.exp),
         num.neg);
     if(BOOST_JSON_UNLIKELY(
-        ! h.on_double(d, {begin, cs.used(begin)}, ec_)))
-        return result::fail;
-    return result::ok;
+        ! h_.on_double(d, {begin, cs.used(begin)}, ec_)))
+        return fail(cs.begin());
+    return cs.begin();
 }
 
 //----------------------------------------------------------
 
-basic_parser::
-basic_parser(const parse_options& opt) noexcept
-    : opt_(opt) 
+template<class Handler>
+template<class... Args>
+basic_parser<Handler>::
+basic_parser(
+    parse_options const& opt,
+    Args&&... args)
+    : h_(std::forward<Args>(args)...)
+    , opt_(opt) 
 {
 }
 
 //----------------------------------------------------------
 
+template<class Handler>
 void
-basic_parser::
+basic_parser<Handler>::
 reset() noexcept
 {
     complete_ = false;
@@ -2985,70 +2602,72 @@ reset() noexcept
 
 template<class Handler>
 std::size_t
-basic_parser::
+basic_parser<Handler>::
 write_some(
-    Handler& h,
     bool more,
     char const* data,
     std::size_t size,
     error_code& ec)
 {
     ec_ = {};
-    result r;
     more_ = more;
-    const_stream cs = { data, size };
+    end_ = data + size;
+    const char* p;
     if(BOOST_JSON_LIKELY(
         st_.empty()))
     {
         // first time
-        depth_ = 0;
+        depth_ = max_depth_;
         is_key_ = false;
         if(BOOST_JSON_UNLIKELY(
-            ! h.on_document_begin(ec_)))
+            ! h_.on_document_begin(ec_)))
         {
             ec = ec_;
             return 0;
         }
-        r = parse_document<true>(h, cs);
+        p = parse_document<true>(data);
     }
     else
     {
-        r = parse_document<false>(h, cs);
+        p = parse_document<false>(data);
     }
 
-    if(BOOST_JSON_LIKELY(! r))
+    if(BOOST_JSON_LIKELY(p != canary()))
     {
         BOOST_ASSERT(! ec_);
         if(! complete_)
         {
             complete_ = true;
-            h.on_document_end(ec_);
+            h_.on_document_end(ec_);
         }
     }
-    else if(r == result::partial)
+    else
     {
-        BOOST_ASSERT(! ec_);
-        if(! more_)
+        if(! ec_)
         {
-            ec_ = error::incomplete;
-        }
-        else if(! st_.empty())
-        {
-            // consume as much trailing whitespace in
-            // the JSON document as possible, but still
-            // consider the parse complete
-            state st;
-            st_.peek(st);
-            if( st == state::doc3 &&
-                ! complete_)
+            if(! more_)
             {
-                complete_ = true;
-                h.on_document_end(ec_);
+                ec_ = error::incomplete;
+            }
+            else if(! st_.empty())
+            {
+                // consume as much trailing whitespace in
+                // the JSON document as possible, but still
+                // consider the parse complete
+                state st;
+                st_.peek(st);
+                if( st == state::doc3 &&
+                    ! complete_)
+                {
+                    complete_ = true;
+                    h_.on_document_end(ec_);
+                }
             }
         }
+        p = end_;
     }
     ec = ec_;
-    return cs.data() - data;
+    return p - data;
 }
 
 #endif

@@ -93,6 +93,16 @@
 # endif
 #endif
 
+#ifndef BOOST_NOINLINE
+# ifdef _MSC_VER
+#  define BOOST_NOINLINE __declspec(noinline)
+# elif defined(__GNUC__) || defined(__clang__)
+#  define BOOST_NOINLINE __attribute__((noinline))
+# else
+#  define BOOST_NOINLINE
+# endif
+#endif
+
 #ifndef BOOST_THROW_EXCEPTION
 # ifndef BOOST_NO_EXCEPTIONS
 #  define BOOST_THROW_EXCEPTION(x) throw(x)
@@ -164,13 +174,9 @@
 
 // These macros are private, for tests, do not change
 // them or else previously built libraries won't match.
-#ifndef  BOOST_JSON_MAX_OBJECT_SIZE
-# define BOOST_JSON_NO_MAX_OBJECT_SIZE
-# define BOOST_JSON_MAX_OBJECT_SIZE  0x7ffffffe
-#endif
-#ifndef  BOOST_JSON_MAX_ARRAY_SIZE
-# define BOOST_JSON_NO_MAX_ARRAY_SIZE
-# define BOOST_JSON_MAX_ARRAY_SIZE   0x7ffffffe
+#ifndef  BOOST_JSON_MAX_STRUCTURED_SIZE
+# define BOOST_JSON_NO_MAX_STRUCTURED_SIZE
+# define BOOST_JSON_MAX_STRUCTURED_SIZE  0x7ffffffe
 #endif
 #ifndef  BOOST_JSON_MAX_STRING_SIZE
 # define BOOST_JSON_NO_MAX_STRING_SIZE
