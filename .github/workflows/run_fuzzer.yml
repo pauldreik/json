@@ -1,7 +1,8 @@
 name: fuzz
 
 env:
-  BINTRAYUSER: cppalliance
+  # not a secret, but keep it configured in the repository so it is easier to switch
+  BINTRAYUSER: ${{ secrets.bintrayApiUser }}
 
 on:
   push:
